@@ -65,12 +65,80 @@ country prefixes like `NL:` and quality tags like `HD`.
   R2 on M3U and Xtream); Show hidden channels brings them back. Xtream and
   Stalker get a Favorite channels folder at the top.
 
-## What was removed from EVO Player
+## What is different from EVO Player
 
-- Emby, Jellyfin, Stremio addons and Nuvio.
-- The USB / internal-storage file browser, FTP network storage and file
-  operations (copy, move, rename, delete).
-- The image viewer and the text reader.
+Kijkr starts from EVO Player 0.12.0. In short: everything that is not live TV
+or IPTV films and series went out, and a lot was added around IPTV.
+
+### Added
+
+**Sources**
+- **Stalker / Ministra portals** (portal URL + MAC), with the channel list
+  kept on disk so Live TV opens at once. EVO had no Stalker support.
+- **Several Xtream Codes accounts and several M3U playlists** side by side
+  (EVO kept one of each).
+- **Per-channel M3U headers**: `#EXTVLCOPT` user-agent / referrer / origin /
+  cookie, `#EXTHTTP`, `#KODIPROP` and `url|User-Agent=...`.
+
+**TV guide**
+- The account's own guide for Xtream (`xmltv.php`) and the portal's guide for
+  Stalker, next to the M3U `url-tvg` EVO already read.
+- **Your own XMLTV guide** (URL or file on USB), gzip guides everywhere, a
+  guide order setting, refresh every 12 hours and 48 hours of history.
+- **TV guide grid**: channels against a two-hour clock.
+- **Catch-up**: watch past programmes back on Xtream channels with an archive
+  and on M3U channels with `catchup` / `timeshift` tags.
+
+**Channels and Home**
+- **Your own channel order**: hide channels, move them, put them back.
+- **Favorite channels** folder for Xtream and Stalker; M3U favourites kept by
+  channel name.
+- **TMDB rows on Home** (Trending, Popular films, Popular series), with your
+  own free TMDB key. Only titles your IPTV provider actually has are shown, and
+  a tile plays straight from the provider.
+- **Continue Watching** knows series and lets you remove an entry.
+- **Cleaner titles**: provider tags like `NL -`, `|NL| 4K`, `MULTI` and
+  symbols the console cannot draw are taken off the displayed name.
+- **Search history**: your last 8 searches.
+
+**Subtitles**
+- **OpenSubtitles.com**: search and download subtitles for what is playing
+  (your own API key and account, in Settings -> Subtitles).
+
+**Languages**
+- The interface in **English, Nederlands, Deutsch, Français and Español**
+  (EVO was English only). A `lang_<code>.txt` file in `/data/kijkr` adds or
+  corrects translations without a new build.
+
+**Settings and system**
+- **Parental lock**: a PIN for chosen categories, or automatically for adult
+  categories by name; locked content stays out of search and Home.
+- **Home & Content** settings section with TMDB, parental lock, Clear cache
+  and Clear search history.
+- **Quit Kijkr** really closes the app (or hold O for two seconds on Home).
+- Own name, logo, title ID (`PPSA99077`) and data folder (`/data/kijkr`), so
+  Kijkr installs next to EVO Player.
+
+### Removed
+
+- **Emby, Jellyfin, Stremio addons and Nuvio**, with their screens and LAN
+  discovery.
+- **The file browser** for USB and internal storage, recent files and the
+  file favourites screen.
+- **FTP network storage** and **file operations** (copy, move, rename,
+  delete, new folder).
+- **The image viewer and the text reader.**
+- The "Folders first" sorting setting that only the file browser used.
+
+### Kept from EVO Player
+
+The player itself is unchanged: hardware decode (H.264, HEVC, VP9, AV1 up to
+4K 10-bit), HDR10 / HLG and Dolby Vision profile 5, audio passthrough and
+5.1 / 7.1, the Surround Sound Studio, FSR and Anime4K upscaling, 120 Hz and
+motion smoothing, subtitles (ASS / SRT / WebVTT, dual subtitles, auto-sync),
+typing from your phone, Xtream films and series, and backup to USB.
+
+The full list per version, in Dutch, is in [WIJZIGINGEN.md](WIJZIGINGEN.md).
 
 ## Installation
 
