@@ -1,0 +1,1516 @@
+/* =============================================================================
+ * IPTV provider bundle - stylesheet (#90)
+ *
+ * NOT an EVO Player stylesheet. Fetched at runtime with main.rml and cached
+ * under /data/kijkr/providers/iptv/.
+ *
+ * It stays inside the RCSS subset the sceAgc backend implements - see
+ * docs/addons/provider-architecture.md. That list is not a style guide, it is
+ * the set of properties that actually rasterise on the console; the backend's
+ * failure mode for anything outside it is a silent mis-render, which is why a
+ * bundle is validated against it at load rather than trusted.
+ *
+ * ---------------------------------------------------------------------------
+ * Palette
+ *
+ * These are EVO's MIDNIGHT tokens, written out as literals:
+ *
+ *   page        #06090e      scrim over wallpaper  #06090e8c
+ *   surface     #101a2cbf    selected surface      #16243cf0
+ *   glass       #0b1220a3    hairline border       #5a7db44d
+ *   accent      #00cdff      accent wash           #00cdff1a
+ *   text        #ffffff      secondary #c2d2e8   muted #7e97b8
+ *   danger      #ff5c5c
+ *
+ * Literals, because a provider context does NOT receive the theme push:
+ * evo_rmlui_set_theme stamps colours onto every element as inline properties,
+ * which would silently overwrite exactly what a bundle exists to supply. The
+ * consequence is that this bundle matches EVO's default theme and does not
+ * follow a theme change - the price of the palette being the bundle's own.
+ * ---------------------------------------------------------------------------
+ *
+ * Still deliberately NOT a nine-row list. A channel guide is a grid that
+ * drills into groups, and being able to say so without changing EVO is the
+ * point of the seam; wearing EVO's chrome while doing it is a choice this
+ * bundle makes, not something EVO imposes.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16dp;
+    color: #ffffff;
+    background-color: #06090e;
+    margin: 0;
+    padding: 0;
+    width: 1920dp;
+    height: 1080dp;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, img {
+    box-sizing: border-box;
+}
+
+/* ---- wallpaper + frosted chrome ---------------------------------------- *
+ *
+ * The header pills and the status strip are translucent panels that blur the
+ * wallpaper; the cards stay opaque so logos and channel names keep their
+ * contrast, and so the page does not pay for a backdrop pass per card.
+ *
+ * Note the direction of the backend difference here: blur is implemented by
+ * the console's sceAgc interface and NOT by the host preview's CPU
+ * rasteriser, so these panels look flat under uiview.sh and frosted on
+ * hardware. That is the opposite of the usual risk - see
+ * docs/addons/provider-architecture.md 6.4.
+ * ------------------------------------------------------------------------ */
+
+#tv-wallpaper {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    decorator: image(/assets/wallpaper/settings_bg.png cover);
+}
+
+/* Knocks the wallpaper back so panel text keeps contrast. Kept light: dim it
+ * too hard and there is no longer enough behind the glass to read as frost. */
+#tv-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #06090e8c;
+}
+
+/* The 152dp gutter is EVO's navigation rail, composited over this context
+ * afterwards. Everything this bundle draws lives to the right of it. */
+#tv-pane {
+    position: absolute;
+    left: 152dp;
+    top: 0;
+    width: 1768dp;
+    height: 1080dp;
+}
+
+/* ============================== 1. Header ============================== */
+
+#tv-header {
+    position: absolute;
+    left: 0;
+    top: 32dp;
+    width: 1704dp;
+    height: 56dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#tv-header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+}
+
+#tv-badge {
+    width: 44dp;
+    height: 44dp;
+    border-radius: 12dp;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#tv-badge-icon {
+    width: 24dp;
+    height: 24dp;
+}
+
+#tv-title-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+#tv-title {
+    display: block;
+    font-size: 22dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 2.5dp;
+}
+
+/* The one place the guide keeps its own red: an on-air light reads as red
+ * everywhere it has ever appeared, and a cyan one would read as decoration. */
+#tv-live-dot {
+    width: 7dp;
+    height: 7dp;
+    border-radius: 4dp;
+    background-color: #ff5c5c;
+}
+
+#tv-path {
+    display: inline-block;
+    background-color: #0e18289e;
+    backdrop-filter: blur(16dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 10dp;
+    padding: 6dp 16dp;
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #c2d2e8;
+    letter-spacing: 1.2dp;
+    max-width: 800dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#tv-header-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+}
+
+.tv-counter,
+.tv-page-pill {
+    display: block;
+    background-color: #00cdff1a;
+    backdrop-filter: blur(16dp);
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 10dp;
+    padding: 6dp 14dp;
+    font-size: 12.5dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+/* =============================== 2. Guide =============================== */
+
+#tv-grid-pane {
+    position: absolute;
+    left: 0;
+    top: 104dp;
+    width: 1704dp;
+    height: 856dp;
+    display: block;
+    overflow: hidden;
+}
+
+/* A failed playlist is a visible bar, not a log line. */
+#tv-notice {
+    display: block;
+    background-color: #0b1220a3;
+    backdrop-filter: blur(22dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 12dp;
+    padding: 12dp 18dp;
+    height: 46dp;          /* fixed (border-box: 20 text + 24 padding + 2 border),
+                              so the view below can sit at a known offset: 62dp */
+    line-height: 20dp;
+    margin-bottom: 14dp;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #c2d2e8;
+    letter-spacing: 0.6dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#tv-notice.tv-notice-bad {
+    background-color: #2a1015d9;
+    border-color: #ff5c5c66;
+    color: #ff9aa6;
+}
+
+/* ---- empty / start state ----------------------------------------------- */
+
+#tv-empty {
+    position: absolute;
+    left: 0;
+    top: 50dp;
+    width: 1704dp;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#tv-setup {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+
+#tv-setup-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 32dp;
+}
+
+#tv-setup-badge {
+    width: 72dp;
+    height: 72dp;
+    border-radius: 36dp;
+    background-color: #0e1828eb;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 14dp;
+}
+
+#tv-setup-badge-icon {
+    width: 36dp;
+    height: 36dp;
+}
+
+#tv-setup-title {
+    font-size: 26dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 1.5dp;
+}
+
+#tv-setup-desc {
+    font-size: 14dp;
+    color: #7e97b8;
+    margin-top: 6dp;
+    letter-spacing: 0.5dp;
+}
+
+#tv-setup-cards {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    gap: 36dp;
+}
+
+.tv-setup-card {
+    tab-index: auto;
+    nav: auto;
+    width: 440dp;
+    height: 360dp;
+    background-color: #101a2cbf;
+    border-width: 1.5dp;
+    border-color: #5a7db44d;
+    border-radius: 20dp;
+    padding: 22dp;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    transition: transform 0.15s cubic-out, border-color 0.15s cubic-out, background-color 0.15s cubic-out;
+}
+
+.tv-setup-card:focus {
+    background-color: #16243cf0;
+    border-width: 2.5dp;
+    border-color: #00cdff;
+    transform: scale(1.02);
+}
+
+.tv-setup-card-preview {
+    width: 396dp;
+    height: 160dp;
+    background-color: #070c16;
+    border-radius: 12dp;
+    border-width: 1dp;
+    border-color: #5a7db426;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tv-setup-icon-circle {
+    width: 72dp;
+    height: 72dp;
+    border-radius: 36dp;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tv-setup-icon {
+    width: 36dp;
+    height: 36dp;
+}
+
+.tv-setup-card-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    margin-top: 10dp;
+    gap: 6dp;
+}
+
+.tv-setup-card-title {
+    font-size: 18dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 1dp;
+}
+
+.tv-setup-card-desc {
+    font-size: 13dp;
+    color: #7e97b8;
+    text-align: center;
+    line-height: 18dp;
+    max-width: 360dp;
+}
+
+.tv-setup-card-action {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 10dp;
+    margin-top: 10dp;
+    padding: 7dp 18dp;
+    border-radius: 12dp;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+}
+
+.tv-setup-card:focus .tv-setup-card-action {
+    background-color: #00cdff33;
+    border-color: #00cdff;
+}
+
+.tv-setup-glyph-box {
+    width: 20dp;
+    height: 20dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tv-setup-glyph {
+    width: 16dp;
+    height: 16dp;
+}
+
+.tv-setup-action-text {
+    font-size: 12.5dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+.tv-setup-card:focus .tv-setup-action-text {
+    color: #ffffff;
+}
+
+#tv-search-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 120dp;
+}
+
+#tv-empty-icon-box {
+    width: 108dp;
+    height: 108dp;
+    border-radius: 54dp;
+    background-color: #0e1828eb;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20dp;
+}
+
+#tv-empty-icon {
+    width: 48dp;
+    height: 48dp;
+}
+
+#tv-empty-title {
+    display: block;
+    font-size: 26dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 1dp;
+}
+
+#tv-empty-hint {
+    display: block;
+    font-size: 15dp;
+    font-weight: normal;
+    color: #7e97b8;
+    margin-top: 8dp;
+}
+
+#tv-empty-subhint {
+    display: block;
+    font-size: 13.5dp;
+    font-weight: normal;
+    color: #5a7db4;
+    margin-top: 6dp;
+}
+
+/* ---- the grid ---------------------------------------------------------- *
+ *
+ * Four across, which is the rhythm EVO's own file browser uses:
+ *
+ *   4 x 398dp + 3 x 24dp gaps + 2 x 10dp padding + 20dp scrollbar = 1704dp
+ *
+ * It was five across at 324dp with 16dp gaps, and read as cramped - group
+ * names are long, and a channel guide is not a contact sheet. Sizing the row
+ * to the full 1704 without leaving the scrollbar its 20dp reflowed it to four
+ * the moment a playlist was long enough to scroll, which is the other way to
+ * get this wrong.
+ *
+ * It scrolls rather than pages because RmlUi's own navigation scrolls the
+ * focused element into view, so a 400-channel group is reachable with the
+ * D-pad and no paging affordance. EVO's own screens page instead; this is a
+ * place the bundle is free to differ and does.
+ * ------------------------------------------------------------------------ */
+
+/* ======================== 2.1 Browser View ======================== */
+
+#tv-browser-view {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1704dp;
+    height: 760dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    overflow: hidden;
+}
+
+/* ---- Fixed 2x4 Channel Grid (ProsperoTV design) ----------------------- *
+ *
+ * 8 cards per page (2 rows x 4 columns). Deterministic paging with L1/R1
+ * and D-pad. Overflow is strictly hidden: no dynamic scrolling, no scrollbar
+ * jumping, zero command buffer bloat.
+ * ------------------------------------------------------------------------ */
+
+#tv-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 16dp;
+    width: 1180dp;
+    height: 760dp;
+    padding: 6dp;
+    overflow: hidden;
+}
+
+#tv-grid.tv-grid-notice {
+    height: 690dp;
+}
+
+/* The notice strip is in flow at the top of the pane, but the browser view is
+ * absolutely positioned at top 0 - so without this the cards were drawn OVER
+ * the notice and it read as stray text behind them. With a notice up, the
+ * whole view (grid and detail panel) starts below it. */
+#tv-browser-view.tv-browser-notice {
+    top: 62dp;
+    height: 698dp;
+}
+
+.tv-browser-notice #tv-detail-pane {
+    height: 680dp;
+}
+
+/* Two rows of 360dp cards need 748dp; with the notice the grid has 690. */
+.tv-browser-notice .tv-card {
+    height: 330dp;
+}
+
+/* ---- the channel card -------------------------------------------------- */
+
+.tv-card {
+    tab-index: auto;
+    nav: auto;
+    width: 278dp;
+    height: 360dp;
+    background-color: #101a2cbf;
+    border-width: 1.5dp;
+    border-color: #5a7db44d;
+    border-radius: 16dp;
+    padding: 12dp;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    transition: transform 0.15s cubic-out, border-color 0.15s cubic-out, background-color 0.15s cubic-out;
+}
+
+.tv-card:focus {
+    background-color: #16243cf0;
+    border-width: 2.5dp;
+    border-color: #00cdff;
+    transform: scale(1.02);
+}
+
+.tv-preview {
+    width: 250dp;
+    height: 140dp;
+    background-color: #070c16;
+    border-radius: 10dp;
+    border-width: 1dp;
+    border-color: #5a7db426;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tv-logo {
+    max-width: 210dp;
+    max-height: 110dp;
+    border-radius: 6dp;
+}
+
+.tv-folder-icon {
+    width: 54dp;
+    height: 54dp;
+}
+
+.tv-initial {
+    font-family: LatoLatin;
+    font-weight: bold;
+    font-size: 48dp;
+    color: #35507a;
+}
+
+.tv-badge-group,
+.tv-badge-live {
+    position: absolute;
+    left: 8dp;
+    top: 8dp;
+    background-color: #06090ed9;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 6dp;
+    padding: 2dp 7dp;
+    font-size: 10.5dp;
+    font-weight: bold;
+    color: #7ce4ff;
+    letter-spacing: 1.2dp;
+}
+
+.tv-badge-live {
+    border-color: #ff5c5c66;
+    color: #ff9aa6;
+}
+
+.tv-card:focus .tv-badge-group {
+    background-color: #00cdff33;
+    border-color: #00cdff;
+    color: #ffffff;
+}
+
+.tv-meta {
+    display: flex;
+    flex-direction: column;
+    margin-top: 8dp;
+    gap: 4dp;
+}
+
+.tv-name {
+    display: block;
+    font-size: 16.5dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.2dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.tv-sub {
+    display: block;
+    font-size: 12.5dp;
+    font-weight: normal;
+    color: #7e97b8;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.tv-card:focus .tv-sub {
+    color: #c2d2e8;
+}
+
+.tv-epg {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6dp;
+    margin-top: 4dp;
+}
+
+.tv-epg-label {
+    font-size: 10dp;
+    font-weight: bold;
+    color: #7ce4ff;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 5dp;
+    padding: 1dp 5dp;
+    letter-spacing: 1.2dp;
+}
+
+.tv-epg-title {
+    font-size: 12dp;
+    color: #c2d2e8;
+    max-width: 180dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.tv-epg-next .tv-epg-label {
+    color: #8ea4c8;
+    background-color: #101c30;
+    border-color: #5a7db44d;
+}
+
+.tv-epg-next .tv-epg-title {
+    color: #7e97b8;
+}
+
+.tv-card-footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8dp;
+    padding-top: 8dp;
+    border-top-width: 1dp;
+    border-top-color: #5a7db426;
+}
+
+.tv-kind {
+    font-size: 11dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+.tv-tag {
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 6dp;
+    padding: 2dp 6dp;
+    font-size: 10dp;
+    font-weight: bold;
+    color: #7ce4ff;
+    letter-spacing: 1.2dp;
+}
+
+/* ==================== 2.2 Selected Detail Preview ==================== */
+
+#tv-detail-pane {
+    width: 496dp;
+    height: 742dp;
+    background-color: #101a2ce6;
+    backdrop-filter: blur(20dp);
+    border-width: 1.5dp;
+    border-color: #5a7db44d;
+    border-radius: 20dp;
+    padding: 22dp;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+}
+
+.tv-detail-kicker {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.5dp;
+    margin-bottom: 8dp;
+}
+
+.tv-detail-preview {
+    width: 450dp;
+    height: 210dp;
+    background-color: #070c16;
+    border-radius: 14dp;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12dp;
+}
+
+.tv-detail-logo {
+    max-width: 380dp;
+    max-height: 170dp;
+    border-radius: 8dp;
+}
+
+.tv-detail-folder-icon {
+    width: 72dp;
+    height: 72dp;
+}
+
+.tv-detail-initial {
+    font-family: LatoLatin;
+    font-weight: bold;
+    font-size: 72dp;
+    color: #35507a;
+}
+
+.tv-detail-badge-live {
+    position: absolute;
+    left: 12dp;
+    top: 12dp;
+    background-color: #2a1015;
+    border-width: 1dp;
+    border-color: #ff5c5c;
+    border-radius: 6dp;
+    padding: 3dp 10dp;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #ff9aa6;
+    letter-spacing: 1.2dp;
+}
+
+.tv-detail-badge-group {
+    position: absolute;
+    left: 12dp;
+    top: 12dp;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff;
+    border-radius: 6dp;
+    padding: 3dp 10dp;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+.tv-detail-meta {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 8dp;
+}
+
+.tv-detail-tag-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10dp;
+    margin-bottom: 6dp;
+}
+
+.tv-detail-num {
+    font-size: 14dp;
+    font-weight: bold;
+    color: #00cdff;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 6dp;
+    padding: 2dp 8dp;
+    letter-spacing: 1dp;
+}
+
+.tv-detail-tech {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #7e97b8;
+    letter-spacing: 0.8dp;
+}
+
+.tv-detail-title {
+    font-size: 22dp;
+    font-weight: bold;
+    color: #ffffff;
+    line-height: 28dp;
+    max-height: 56dp;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4dp;
+}
+
+.tv-detail-sub {
+    font-size: 13.5dp;
+    color: #7e97b8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 8dp;
+}
+
+.tv-detail-epg-box {
+    background-color: #080e1a;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    border-radius: 12dp;
+    padding: 10dp 14dp;
+    display: flex;
+    flex-direction: column;
+    gap: 8dp;
+    margin-bottom: 12dp;
+}
+
+.tv-detail-epg-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-width: 1dp;
+    border-bottom-color: #5a7db426;
+    padding-bottom: 4dp;
+    margin-bottom: 2dp;
+}
+
+.tv-detail-epg-heading {
+    font-size: 11dp;
+    font-weight: bold;
+    color: #7ce4ff;
+    letter-spacing: 1.5dp;
+}
+
+.tv-detail-epg-badge-onair {
+    font-size: 10.5dp;
+    font-weight: bold;
+    color: #4ade80;
+    letter-spacing: 1dp;
+}
+
+.tv-detail-epg-standby {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+    padding: 2dp 0;
+}
+
+.tv-detail-epg-standby-badge {
+    font-size: 10dp;
+    font-weight: bold;
+    color: #8ea4c8;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    border-radius: 4dp;
+    padding: 1dp 5dp;
+}
+
+.tv-detail-epg-standby-text {
+    font-size: 12dp;
+    color: #8ea4c8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 320dp;
+}
+
+.tv-detail-epg-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10dp;
+}
+
+.tv-detail-epg-badge {
+    font-size: 10.5dp;
+    font-weight: bold;
+    color: #7ce4ff;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 5dp;
+    padding: 2dp 6dp;
+    letter-spacing: 1.2dp;
+}
+
+.tv-detail-badge-next {
+    color: #c2d2e8;
+    background-color: #5a7db426;
+    border-color: #5a7db44d;
+}
+
+.tv-detail-epg-text {
+    font-size: 13dp;
+    color: #c2d2e8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 340dp;
+}
+
+.tv-detail-action {
+    tab-index: auto;
+    nav: auto;
+    width: 100%;
+    height: 48dp;
+    background-color: #00cdff;
+    border-radius: 12dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 10dp;
+    transition: transform 0.15s cubic-out, background-color 0.15s cubic-out;
+}
+
+.tv-detail-action:focus {
+    background-color: #38dcff;
+    border-width: 2dp;
+    border-color: #ffffff;
+    transform: scale(1.02);
+}
+
+.tv-detail-glyph-box {
+    width: 22dp;
+    height: 22dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tv-detail-glyph {
+    width: 16dp;
+    height: 16dp;
+}
+
+.tv-detail-action-text {
+    font-size: 15dp;
+    font-weight: bold;
+    color: #06090e;
+    letter-spacing: 1.2dp;
+}
+
+.tv-detail-paging {
+    text-align: center;
+    margin-top: 6dp;
+}
+
+.tv-detail-page-hint {
+    font-size: 11.5dp;
+    color: #5a7db4;
+    letter-spacing: 0.5dp;
+}
+
+/* ========================== 3. Status strip ========================== */
+
+#tv-status-strip {
+    position: absolute;
+    left: 0;
+    bottom: 20dp;
+    width: 1704dp;
+    height: 60dp;
+    background-color: #0b1220a3;
+    backdrop-filter: blur(22dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 16dp;
+    padding: 0 18dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+#tv-status-details {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+    max-width: 700dp;
+}
+
+#tv-source-name {
+    font-size: 17dp;
+    font-weight: bold;
+    color: #ffffff;
+    max-width: 280dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.tv-spec-pill {
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 8dp;
+    padding: 4dp 10dp;
+    font-size: 11.5dp;
+    font-weight: bold;
+    color: #c2d2e8;
+    letter-spacing: 1.2dp;
+    max-width: 320dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+@keyframes tv-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes tv-pulse {
+    from {
+        opacity: 0.4;
+    }
+    to {
+        opacity: 1.0;
+    }
+}
+
+.tv-spinner {
+    display: inline-block;
+    width: 48dp;
+    height: 48dp;
+    border-radius: 24dp;
+    border-width: 4dp;
+    border-color: #00cdff33;
+    border-top-color: #00cdff;
+    animation: 0.8s linear infinite tv-spin;
+}
+
+.tv-spinner-sm {
+    display: inline-block;
+    width: 16dp;
+    height: 16dp;
+    border-radius: 8dp;
+    border-width: 2.5dp;
+    border-color: #00cdff33;
+    border-top-color: #00cdff;
+    animation: 0.8s linear infinite tv-spin;
+}
+
+#tv-tuning-indicator {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 8dp;
+    padding: 3dp 10dp;
+}
+
+#tv-tuning {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+/* Centered tuning overlay while connecting to stream */
+#tv-tuning-overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1704dp;
+    height: 856dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+}
+
+#tv-tuning-card {
+    width: 440dp;
+    padding: 36dp 28dp;
+    background-color: #0b1220f2;
+    backdrop-filter: blur(28dp);
+    border-width: 1.5dp;
+    border-color: #00cdff80;
+    border-radius: 20dp;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16dp;
+}
+
+#tv-tuning-title {
+    font-size: 20dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 2dp;
+}
+
+#tv-tuning-subtitle {
+    font-size: 13.5dp;
+    color: #7e97b8;
+    text-align: center;
+    letter-spacing: 0.5dp;
+}
+
+#tv-footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 20dp;
+}
+
+.tv-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.tv-glyph {
+    width: 32dp;
+    height: 32dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 16dp;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+}
+
+.tv-glyph-img {
+    width: 20dp;
+    height: 20dp;
+}
+
+.tv-glyph-pill {
+    padding: 4dp 9dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10dp;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+}
+
+.tv-glyph-pill-text {
+    font-size: 11dp;
+    font-weight: bold;
+    color: #00cdff;
+}
+
+.tv-hint-text {
+    font-size: 12.5dp;
+    font-weight: bold;
+    color: #8ea4c8;
+    letter-spacing: 1.2dp;
+}
+
+/* ---------------------------------------------------------------------------
+ * "Set up a guide" in the channel guide box
+ * ------------------------------------------------------------------------- */
+.tv-detail-epg-setup {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-top: 4dp;
+}
+
+.tv-detail-epg-setup-pill {
+    font-size: 10dp;
+    font-weight: bold;
+    color: #00cdff;
+    background-color: #00cdff22;
+    border-width: 1dp;
+    border-color: #00cdff66;
+    border-radius: 6dp;
+    padding: 2dp 7dp;
+    letter-spacing: 1dp;
+    margin-right: 8dp;
+}
+
+.tv-detail-epg-setup-text {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #ffcd00;
+    letter-spacing: 1dp;
+}
+
+/* ---------------------------------------------------------------------------
+ * Side panel - Live TV options / channel guide picker (Settings' rows)
+ * ------------------------------------------------------------------------- */
+#op-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1200dp;
+    height: 1080dp;
+    background-color: #000000b0;
+}
+
+#op-panel {
+    display: block;
+    position: absolute;
+    left: 1200dp;
+    top: 0;
+    width: 720dp;
+    height: 1080dp;
+    background-color: #0a1019;
+    border-left-width: 1dp;
+    border-left-color: #ffffff1f;
+    padding: 64dp 40dp 0 40dp;
+    box-sizing: border-box;
+}
+
+.op-eyebrow {
+    display: block;
+    font-size: 13dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 2.4dp;
+}
+
+.op-crumb {
+    color: #5e718c;
+}
+
+.op-title {
+    display: block;
+    font-size: 36dp;
+    font-weight: bold;
+    color: #eef4ff;
+    letter-spacing: 1dp;
+    margin-top: 10dp;
+}
+
+.op-sub {
+    display: block;
+    font-size: 15dp;
+    color: #7c8ba3;
+    margin-top: 8dp;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.op-rows {
+    display: block;
+    margin-top: 40dp;
+}
+
+.op-row {
+    height: 84dp;
+    padding: 0 18dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-width: 1dp;
+    border-bottom-color: #ffffff14;
+}
+
+.op-row.op-focused {
+    background-color: #ffcd0026;
+    border-radius: 12dp;
+    border-bottom-color: transparent;
+}
+
+.op-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.op-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.op-ibox {
+    width: 52dp;
+    height: 52dp;
+    background-color: #00cdff14;
+    border-width: 1dp;
+    border-color: #00cdff33;
+    border-radius: 14dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 18dp;
+}
+
+.op-focused .op-ibox {
+    background-color: #ffcd0026;
+    border-color: #ffcd0066;
+}
+
+.op-icon {
+    width: 26dp;
+    height: 26dp;
+}
+
+.op-text {
+    display: block;
+}
+
+.op-rt {
+    display: block;
+    font-size: 22dp;
+    font-weight: bold;
+    color: #eef4ff;
+    letter-spacing: 0.4dp;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 440dp;
+}
+
+.op-rd {
+    display: block;
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 0.6dp;
+    margin-top: 5dp;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 440dp;
+}
+
+.op-focused .op-rd {
+    color: #ffcd00;
+}
+
+.op-rd.op-warn {
+    color: #ffa940;
+}
+
+.op-chev {
+    width: 20dp;
+    height: 20dp;
+}
+
+.op-badge {
+    background-color: #0a101c99;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    border-radius: 10dp;
+    padding: 7dp 16dp;
+    font-size: 12dp;
+    font-weight: bold;
+    color: #7c8ba3;
+    letter-spacing: 1.4dp;
+    margin-right: 14dp;
+}
+
+.op-badge.op-live {
+    color: #33d17a;
+    border-color: #33d17a55;
+}
+
+.op-radio {
+    width: 22dp;
+    height: 22dp;
+    border-width: 2dp;
+    border-color: #5e718c;
+    border-radius: 11dp;
+    margin-right: 22dp;
+    box-sizing: border-box;
+}
+
+.op-radio.op-on {
+    border-color: #ffcd00;
+}
+
+.op-dot {
+    display: block;
+    width: 10dp;
+    height: 10dp;
+    margin: 4dp;
+    border-radius: 5dp;
+    background-color: #ffcd00;
+}
+
+.op-note {
+    display: block;
+    margin-top: 34dp;
+    padding: 18dp 20dp;
+    background-color: #00cdff0f;
+    border-width: 1dp;
+    border-color: #00cdff26;
+    border-radius: 14dp;
+    font-size: 15dp;
+    color: #9fb0c8;
+    line-height: 22dp;
+}
+
+.op-note-b {
+    color: #eef4ff;
+    font-weight: bold;
+}
+
+.op-foot {
+    position: absolute;
+    left: 40dp;
+    bottom: 44dp;
+    width: 640dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.op-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-right: 30dp;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #9fb0c8;
+    letter-spacing: 1.4dp;
+}
+
+.op-hint img {
+    width: 30dp;
+    height: 30dp;
+    margin-right: 10dp;
+}
+
+/* "Using up.kiwi - Circle to go back to it" under the setup title. */
+#tv-setup-account {
+    display: block;
+    margin-top: 10dp;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #ffcd00;
+    letter-spacing: 0.6dp;
+    text-align: center;
+}

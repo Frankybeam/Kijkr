@@ -1,0 +1,313 @@
+# =============================================================================
+# Kijkr release
+#
+# Builds the app module in the same pinned Docker environment developers use
+# locally, PFS-packs it into a single PPSA99077.ffpfsc image
+# (scripts/package-app.sh --ffpfsc), and publishes that as a GitHub release.
+# This is the ONLY hardware path (see CLAUDE.md / docs/tooling.md) — the old
+# ELF/Media-tile/hbldr release route reached none of EVO's headline features
+# (no sceVideodec2 hardware decode, no sceAgc GPU present, no real user
+# session) and was replaced here (#36).
+#
+# Triggered by pushing a tag:
+#     git tag v0.8.0 && git push origin v0.8.0
+# or manually from the Actions tab.
+#
+# The PS5 is obviously not present on a runner, so nothing here is
+# hardware-tested. Release notes say so explicitly rather than implying a
+# verification that did not happen.
+# =============================================================================
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.8.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TITLE_ID: PPSA99077
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0   # all tags, for the contentVersion check below
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${TAG}"
+
+      # The VERSION file and the tag must agree, otherwise the player reports
+      # a different version than the release it came from. param.json's own
+      # contentVersion/masterVersion format is validated independently by
+      # package-app.sh (step 1) on every build below; a formal VERSION-tag ->
+      # contentVersion mapping is still an open decision (#36 §3) and
+      # deliberately not invented here, since the current contentVersion
+      # (01.000.001) predates this pipeline and forcing a new mapping now
+      # would fail every past-tagged release retroactively for no benefit.
+      - name: Check VERSION matches the tag
+        run: |
+          FILE_VER="$(tr -d '[:space:]' < projects/evoplayer/VERSION)"
+          WANT="${{ steps.ver.outputs.version }}"
+          if [ "${FILE_VER#v}" != "$WANT" ]; then
+            echo "::error::projects/evoplayer/VERSION is '$FILE_VER' but the tag says '$WANT'"
+            exit 1
+          fi
+          echo "VERSION $FILE_VER matches tag"
+
+      # ProsperoStore / homebrew.page offer an update only when contentVersion
+      # in sce_sys/param.json is higher than the installed one. v0.11.0 first
+      # shipped with 0.10.0's value and was invisible to consoles as an update.
+      - name: Check contentVersion went up since the previous release
+        run: |
+          P=projects/evoplayer/sce_sys/param.json
+          CUR="$(python3 -c "import json;print(json.load(open('$P'))['contentVersion'])")"
+          PREV_TAG="$(git tag --list 'v*' --sort=-v:refname | grep -vx "${{ steps.ver.outputs.tag }}" | head -1)"
+          PREV="$(git show "${PREV_TAG}:${P}" 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin)['contentVersion'])" 2>/dev/null || echo 00.000.000)"
+          echo "contentVersion ${CUR} (previous release ${PREV_TAG:-none}: ${PREV})"
+          if ! python3 -c "import sys;t=lambda v:tuple(int(x) for x in v.split('.'));sys.exit(0 if t('${CUR}')>t('${PREV}') else 1)"; then
+            echo "::error::contentVersion ${CUR} is not higher than ${PREV} (${PREV_TAG}); consoles would not see this release as an update"
+            exit 1
+          fi
+
+      # Pinned to the same revision setup-pfs-tool.sh checks out - not
+      # essential (the script re-fetches on a cache miss), just saves the
+      # clone + pip-install on every release run.
+      - name: Cache MkPFS toolchain
+        uses: actions/cache@v4
+        with:
+          path: .deps/MkPFS
+          key: mkpfs-${{ hashFiles('scripts/setup-pfs-tool.sh') }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: evo-player/ps5-dev:release
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # --ffpfsc also runs the plain (no-flag) app-module build first - see
+      # scripts/package-app.sh - so this is the only build step needed. No
+      # --usb-remote / --agc-probe / --breadcrumbs: a release ships the same
+      # defaults docs/tooling.md documents as the normal deploy.
+      - name: Build and PFS-pack the app module
+        run: |
+          # The image's SDK ships FFmpeg 7.0.1; EVO needs 7.1.1 (AV1 fixes, and
+          # evo_dovi.c refuses to build against anything else). Local builds get
+          # it from build-ffmpeg.sh --install in a persistent volume, so CI has
+          # to build and install it into this container before packaging.
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:release bash -lc \
+            './scripts/build-ffmpeg.sh --profile minimal --install && ./scripts/package-app.sh --ffpfsc --zip'
+
+      # Independent checks on top of what package-app.sh already asserts
+      # while building (titleId/version format, MkPFS "Errors: 0") - a
+      # regression in package-app.sh's own checks should not be able to hide
+      # behind a green build. Checks the FOLDER copy of eboot.bin, which
+      # tooling.md documents as byte-identical to the one inside the
+      # .ffpfsc - the same container, just packed differently.
+      - name: Verify the release image
+        run: |
+          cat > /tmp/verify_param.py <<'PY'
+          import json, os, sys
+          appdir = sys.argv[1]
+          title_id = sys.argv[2]
+          p = json.load(open(os.path.join(appdir, "sce_sys/param.json")))
+          assert p["titleId"] == title_id, f'titleId is {p["titleId"]!r}, expected {title_id!r}'
+          print(f'param.json ok: titleId={p["titleId"]!r} '
+                f'contentVersion={p["contentVersion"]!r} masterVersion={p["masterVersion"]!r}')
+          PY
+          docker run --rm -v "$PWD:/workspace" -v /tmp/verify_param.py:/tmp/verify_param.py \
+            -w /workspace -e TITLE_ID="${{ env.TITLE_ID }}" \
+            evo-player/ps5-dev:release bash -lc '
+              set -e
+              IMG="output/app/${TITLE_ID}.ffpfsc"
+              APPDIR="output/app/${TITLE_ID}"
+
+              [ -f "$IMG" ] || { echo "missing $IMG - MkPFS pack failed"; exit 1; }
+              SZ="$(stat -c %s "$IMG")"
+              [ "$SZ" -gt 1000000 ] || { echo "$IMG is suspiciously small ($SZ bytes)"; exit 1; }
+
+              # eboot.bin is FSELF-wrapped (fake-signed) - `file`/readelf see
+              # its custom container header, not an ELF header, and report
+              # "data". Check the pre-sign ELF that package-app.sh keeps
+              # around for the actual "is this a real, non-host PS5 binary"
+              # question; check the signed eboot.bin itself only for
+              # container integrity.
+              PRESIGN="output/app/.build/eboot.elf"
+              file "$PRESIGN" | grep -q "ELF 64-bit LSB.*x86-64" \
+                || { echo "$PRESIGN is not a PS5 ELF"; exit 1; }
+              llvm-readelf -l "$PRESIGN" | grep -q "/lib64/ld-linux" \
+                && { echo "$PRESIGN links the HOST loader - wrong compiler"; exit 1; }
+
+              F="$APPDIR/eboot.bin"
+              output/app/.build/host/ps5-native-tool self --inspect --file "$F" \
+                | tee /dev/stderr | grep -q "integrity: valid" \
+                || { echo "$F did not report a valid signed container"; exit 1; }
+
+              python3 /tmp/verify_param.py "$APPDIR" "$TITLE_ID"
+
+              [ -f "$APPDIR/sce_module/libc.prx" ] || { echo "missing sce_module/libc.prx"; exit 1; }
+              [ "$(stat -c %s "$APPDIR/sce_module/libc.prx")" -gt 0 ] || { echo "libc.prx is empty"; exit 1; }
+
+              # Guards against an empty asset bundle - both the loose folder
+              # copy AND #60s embedded evo_rmlui_bundle_data.cpp landing empty
+              # would otherwise ship a UI-less player with everything else
+              # green.
+              ASSET_BYTES="$(du -sb "$APPDIR/assets" | cut -f1)"
+              [ "$ASSET_BYTES" -gt 1000000 ] || { echo "assets/ is suspiciously small ($ASSET_BYTES bytes)"; exit 1; }
+
+              echo "ok: $IMG  ${SZ} bytes, integrity valid, assets ${ASSET_BYTES} bytes"
+            '
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          T="${{ steps.ver.outputs.tag }}"
+          cp "output/app/${TITLE_ID}.ffpfsc" "dist/Kijkr-${T}-${TITLE_ID}.ffpfsc"
+          cp "output/app/${TITLE_ID}.zip" "dist/Kijkr-${T}-${TITLE_ID}.zip"
+          ( cd dist && sha256sum * > SHA256SUMS.txt )
+          ls -la dist
+
+      # Pull this version's section out of CHANGELOG.md so the release says
+      # what actually changed. Without this every release carried the same
+      # boilerplate and nothing about its own contents.
+      - name: Extract changelog section
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          if awk -v v="## ${V}" '
+                ($0 == v || index($0, v ":") == 1) {found=1; next}
+                found && /^## / {exit}
+                found {print}
+              ' WIJZIGINGEN.md > dist_notes_body.md && [ -s dist_notes_body.md ]; then
+            echo "found changelog section for ${V}"
+          else
+            echo "::warning::no WIJZIGINGEN.md section for ${V} - notes will be boilerplate only"
+            : > dist_notes_body.md
+          fi
+
+      - name: Release notes
+        run: |
+          mkdir -p dist
+          if [ -s dist_notes_body.md ]; then
+            cat dist_notes_body.md > dist/NOTES.md
+            echo "" >> dist/NOTES.md
+            echo "---" >> dist/NOTES.md
+            echo "" >> dist/NOTES.md
+          fi
+          cat >> dist/NOTES.md <<'EOF'
+          ## Install — start here
+
+          Choose either the **`.ffpfsc`** image or the **`.zip`** archive:
+
+          ### Option A: PFS Image (`.ffpfsc`)
+
+          **Download `Kijkr-*-PPSA99077.ffpfsc`.** That is the whole app
+          module, PFS-packed and ready to mount — no loose files, no second
+          download.
+
+          1. Jailbreak the console (any firmware below 13.60) and run a jailbreak
+             daemon (PS5-Lapy-JB-Daemon or etaHEN) — re-run it after every
+             reboot.
+          2. Copy the `.ffpfsc` to `/data/homebrew/PPSA99077.ffpfsc` on the
+             console (FTP, or `PS5_HOST=<ip> ./scripts/deploy-app.sh --ffpfsc`
+             from a checkout).
+          3. **ShadowMountPlus** auto-mounts + registers it on the `.ffpfsc`
+             change and can auto-launch it; otherwise mount it and launch
+             **Kijkr from the Games row**.
+
+          ### Option B: Folder Title Archive (`.zip`)
+
+          **Download `Kijkr-*-PPSA99077.zip`.** Standard homebrew folder title
+          layout (identical layout to Kodi PS5).
+
+          1. Extract the zip into `/data/homebrew/` on the console over FTP
+             (creates `/data/homebrew/PPSA99077/`).
+          2. Register the title with **ShadowMountPlus** (or your preferred
+             homebrew launcher) and launch **Kijkr from the Games row**.
+
+          Never stack launches — PS button to close a running Kijkr before
+          relaunching (deploying/launching over a live instance risks a
+          console kernel panic).
+
+          ## Requirements
+
+          * PS5 on any firmware **below 13.60**, jailbroken (re-run after every reboot)
+          * ShadowMountPlus (or another tool that understands `.ffpfsc` / folder titles)
+          * An IPTV source: an M3U playlist, an Xtream Codes account or a Stalker portal
+
+          ## Verification
+
+          Built reproducibly in CI from the pinned toolchain (clang 18,
+          PS5 Payload SDK v0.42, FFmpeg 7.1.1). **CI has no console, so this
+          image is not hardware-tested** — it is exactly what
+          `scripts/package-app.sh` produces locally. Checksum in
+          `SHA256SUMS.txt`.
+
+          Licensed GPL-3.0-or-later. Kijkr is a fork of EVO Player by sainsaji
+          (github.com/sainsaji/EVO-PLAYER-PS5), itself derived from ProsperoPlayer; see NOTICE.
+          EOF
+          cat dist/NOTES.md
+
+      # Publish only on a real tag push. A workflow_dispatch run therefore
+      # does everything else - build, PFS-pack, verify the image, collect
+      # artifacts, extract the notes - and stops short of creating a release,
+      # which makes it a dry run of the whole pipeline.
+      #
+      # That matters because this workflow last ran for v0.7.0 in August, 315
+      # commits and an entire architecture ago (payload -> app module, CPU ->
+      # GPU, software -> hardware decode). Being able to prove it still works
+      # without publishing anything is the difference between finding out now
+      # and finding out from a broken release.
+      #
+      # The .ffpfsc is still uploaded as a run artifact either way, so a dry
+      # run is inspectable.
+      - name: Upload the release files as a run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kijkr-${{ steps.ver.outputs.tag }}
+          path: |
+            dist/Kijkr-*.ffpfsc
+            dist/Kijkr-*.zip
+            dist/SHA256SUMS.txt
+            dist/NOTES.md
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Kijkr ${{ steps.ver.outputs.tag }}
+          body_path: dist/NOTES.md
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            dist/Kijkr-*.ffpfsc
+            dist/Kijkr-*.zip
+            dist/SHA256SUMS.txt

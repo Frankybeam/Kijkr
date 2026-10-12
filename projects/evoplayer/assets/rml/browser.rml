@@ -1,0 +1,437 @@
+<rml>
+<head>
+    <link type="text/rcss" href="browser.rcss"/>
+</head>
+<body id="browser-body">
+    <!-- Navigation rail comes from the standalone navbar.rml overlay -->
+
+    <!-- Wallpaper + scrim. The frosted chrome below has to have something to
+         refract: backdrop-filter over a flat fill returns the same flat fill,
+         so a blurred panel on a solid page looks identical to a plain one.
+         Same plate the settings shell uses, so the two screens read as one
+         surface. -->
+    <div id="browser-wallpaper"></div>
+    <div id="browser-scrim"></div>
+
+    <div id="browser-pane">
+        <!-- 1. Top Toolbar: Location, Breadcrumbs, Search, Counter -->
+        <div id="browser-header">
+            <div id="browser-header-left">
+                <div id="browser-badge">
+                    <img id="browser-badge-icon" src="../icons/icon_browse_usb.png"/>
+                </div>
+                <div id="browser-title-row">
+                    <span id="browser-title">FILES</span>
+                    <span id="browser-live-dot"></span>
+                </div>
+                <div id="browser-path">Other Locations</div>
+            </div>
+            <div id="browser-filter-row">
+                <span id="browser-filter-caption">SHOW</span>
+                <span id="browser-chip-0" class="browser-chip">All</span>
+                <span id="browser-chip-1" class="browser-chip">Videos</span>
+                <span id="browser-chip-2" class="browser-chip">Music</span>
+                <span id="browser-chip-3" class="browser-chip">Photos</span>
+                <span id="browser-filter-hint">&#8593; from the grid</span>
+            </div>
+            <div id="browser-header-right">
+                <div id="browser-search-pill">
+                    <img src="../icons/btn_square.png" class="btn-glyph-sm"/>
+                    <span class="search-pill-label">SEARCH</span>
+                </div>
+                <div id="browser-counter">0 ITEMS</div>
+            </div>
+        </div>
+
+        <!-- 2. Left Sidebar: Places / Sources / Filters -->
+        <div id="browser-sidebar">
+            <div class="sb-section-title">SOURCES</div>
+            <div id="sb-item-0" class="sb-item sb-item-active">
+                <img id="sb-icon-0" class="sb-icon" src="../icons/icon_browse_usb.png"/>
+                <span id="sb-label-0" class="sb-label">USB Drive</span>
+            </div>
+            <div id="sb-item-1" class="sb-item">
+                <img id="sb-icon-1" class="sb-icon" src="../icons/icon_folder.png"/>
+                <span id="sb-label-1" class="sb-label">Internal Storage</span>
+            </div>
+            <div id="sb-item-2" class="sb-item">
+                <img id="sb-icon-2" class="sb-icon" src="../icons/icon_browse_usb.png"/>
+                <span id="sb-label-2" class="sb-label">Network (FTP)</span>
+            </div>
+            <div id="sb-item-3" class="sb-item">
+                <img id="sb-icon-3" class="sb-icon" src="../icons/icon_favorites.png"/>
+                <span id="sb-label-3" class="sb-label">Favorites</span>
+            </div>
+            <div id="sb-item-4" class="sb-item">
+                <img id="sb-icon-4" class="sb-icon" src="../icons/icon_recent_files.png"/>
+                <span id="sb-label-4" class="sb-label">Recent Media</span>
+            </div>
+        </div>
+
+        <!-- 3. Main File Area: Media Grid -->
+        <div id="browser-grid-pane">
+            <!-- Empty state when no items in directory -->
+            <div id="browser-empty">
+                <div id="browser-empty-icon-box">
+                    <img id="browser-empty-icon" src="../icons/icon_browse_usb.png"/>
+                </div>
+                <div id="browser-empty-title">FOLDER IS EMPTY</div>
+                <div id="browser-empty-hint">No supported media files found</div>
+            </div>
+
+            <!-- 2x4 Media Card Grid (8 items visible per page) -->
+            <div id="browser-grid">
+                <div id="brow-0" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-0" class="card-preview-art"></div>
+                        <img id="brow-icon-0" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-0" class="card-badge"></div>
+                        <img id="brow-fav-0" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-0" class="card-duration"></div>
+                        <div id="brow-track-0" class="card-track"><div id="brow-fill-0" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-0" class="card-title"></div>
+                        <div id="brow-detail-0" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-0" class="card-kind"></div>
+                        <div id="brow-ext-0" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-1" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-1" class="card-preview-art"></div>
+                        <img id="brow-icon-1" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-1" class="card-badge"></div>
+                        <img id="brow-fav-1" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-1" class="card-duration"></div>
+                        <div id="brow-track-1" class="card-track"><div id="brow-fill-1" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-1" class="card-title"></div>
+                        <div id="brow-detail-1" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-1" class="card-kind"></div>
+                        <div id="brow-ext-1" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-2" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-2" class="card-preview-art"></div>
+                        <img id="brow-icon-2" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-2" class="card-badge"></div>
+                        <img id="brow-fav-2" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-2" class="card-duration"></div>
+                        <div id="brow-track-2" class="card-track"><div id="brow-fill-2" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-2" class="card-title"></div>
+                        <div id="brow-detail-2" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-2" class="card-kind"></div>
+                        <div id="brow-ext-2" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-3" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-3" class="card-preview-art"></div>
+                        <img id="brow-icon-3" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-3" class="card-badge"></div>
+                        <img id="brow-fav-3" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-3" class="card-duration"></div>
+                        <div id="brow-track-3" class="card-track"><div id="brow-fill-3" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-3" class="card-title"></div>
+                        <div id="brow-detail-3" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-3" class="card-kind"></div>
+                        <div id="brow-ext-3" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-4" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-4" class="card-preview-art"></div>
+                        <img id="brow-icon-4" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-4" class="card-badge"></div>
+                        <img id="brow-fav-4" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-4" class="card-duration"></div>
+                        <div id="brow-track-4" class="card-track"><div id="brow-fill-4" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-4" class="card-title"></div>
+                        <div id="brow-detail-4" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-4" class="card-kind"></div>
+                        <div id="brow-ext-4" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-5" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-5" class="card-preview-art"></div>
+                        <img id="brow-icon-5" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-5" class="card-badge"></div>
+                        <img id="brow-fav-5" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-5" class="card-duration"></div>
+                        <div id="brow-track-5" class="card-track"><div id="brow-fill-5" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-5" class="card-title"></div>
+                        <div id="brow-detail-5" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-5" class="card-kind"></div>
+                        <div id="brow-ext-5" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-6" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-6" class="card-preview-art"></div>
+                        <img id="brow-icon-6" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-6" class="card-badge"></div>
+                        <img id="brow-fav-6" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-6" class="card-duration"></div>
+                        <div id="brow-track-6" class="card-track"><div id="brow-fill-6" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-6" class="card-title"></div>
+                        <div id="brow-detail-6" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-6" class="card-kind"></div>
+                        <div id="brow-ext-6" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-7" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-7" class="card-preview-art"></div>
+                        <img id="brow-icon-7" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-7" class="card-badge"></div>
+                        <img id="brow-fav-7" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-7" class="card-duration"></div>
+                        <div id="brow-track-7" class="card-track"><div id="brow-fill-7" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-7" class="card-title"></div>
+                        <div id="brow-detail-7" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-7" class="card-kind"></div>
+                        <div id="brow-ext-7" class="card-ext"></div>
+                    </div>
+                </div>
+
+                <!-- Hidden cards 8..11 to maintain 12-item buffer compatibility -->
+                <div id="brow-8" class="grid-card-hidden"></div>
+                <div id="brow-9" class="grid-card-hidden"></div>
+                <div id="brow-10" class="grid-card-hidden"></div>
+                <div id="brow-11" class="grid-card-hidden"></div>
+            </div>
+        </div>
+
+        <!-- 4. Bottom Status & Selection Strip -->
+        <div id="browser-status-strip">
+            <div id="status-details">
+                <span id="ins-name" class="status-name">No Selection</span>
+                <div id="status-specs">
+                    <span id="status-pill-res" class="status-spec-pill"></span>
+                    <span id="status-pill-vcodec" class="status-spec-pill"></span>
+                    <span id="status-pill-acodec" class="status-spec-pill"></span>
+                    <span id="status-pill-duration" class="status-spec-pill"></span>
+                    <span id="status-pill-size" class="status-spec-pill"></span>
+                    <span id="ins-probing" class="status-probing">PROBING...</span>
+                </div>
+            </div>
+
+            <!-- Controller action hints -->
+            <div id="browser-footer">
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
+                    <span id="footer-action-label" class="footer-text">OPEN</span>
+                </div>
+                <div class="footer-hint" id="bhint-back">
+                    <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">BACK</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">SEARCH</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">FAVORITE</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge-pill"><span class="glyph-pill-text">L1 / R1</span></div>
+                    <span class="footer-text">PAGE</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge-pill"><span class="glyph-pill-text">L2 / R2</span></div>
+                    <span class="footer-text">A-Z</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge-pill"><span class="glyph-pill-text">OPTIONS</span></div>
+                    <span class="footer-text">OPERATIONS</span>
+                </div>
+                <div id="browser-footer-version">v0.11.0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Operations Action Menu Scrim & Modal -->
+    <div id="browser-action-scrim" class="action-scrim-hidden">
+        <div id="browser-action-card">
+            <div id="browser-action-header">
+                <div class="action-header-badge">
+                    <div class="action-indicator"></div>
+                    <span id="browser-action-eyebrow">OPTIONS  •  FILE OPERATIONS</span>
+                </div>
+                <div id="action-target-card">
+                    <img id="action-target-icon" src="../icons/icon_folder.png" class="action-target-icon"/>
+                    <div class="action-target-col">
+                        <span id="browser-action-target" class="action-target-title">Current Directory</span>
+                        <span id="browser-action-target-sub" class="action-target-sub">Directory</span>
+                    </div>
+                </div>
+                <div id="browser-action-clip-badge" class="action-clip-badge">
+                    <img src="../icons/icon_recent_files.png" class="action-clip-icon"/>
+                    <span id="browser-action-clip-text" class="action-clip-text">CLIPBOARD</span>
+                </div>
+            </div>
+            <div id="browser-action-list">
+                <!-- 0: Copy -->
+                <div id="act-row-0" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/icon_browse_usb.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">Copy</span>
+                        <span class="act-desc">Copy item to clipboard</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 1: Cut (Move) -->
+                <div id="act-row-1" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/icon_recent_files.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">Cut (Move)</span>
+                        <span class="act-desc">Move item to clipboard for relocation</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 2: Paste -->
+                <div id="act-row-2" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/icon_folder.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">Paste</span>
+                        <span class="act-desc">Paste clipboard item into this folder</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 3: Rename -->
+                <div id="act-row-3" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/icon_type.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">Rename</span>
+                        <span class="act-desc">Change file or folder name</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 4: Delete -->
+                <div id="act-row-4" class="action-row action-row-danger-slot">
+                    <div class="act-icon-box act-icon-danger"><img src="../icons/icon_trash.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label act-label-danger">Delete</span>
+                        <span class="act-desc">Permanently remove this item</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 5: New Folder -->
+                <div id="act-row-5" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/icon_folder.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">New Folder</span>
+                        <span class="act-desc">Create directory in current location</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 6: Close -->
+                <div id="act-row-6" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/btn_circle.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">Close</span>
+                        <span class="act-desc">Dismiss menu and return to browser</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_circle.png" class="act-glyph-img"/></div>
+                </div>
+            </div>
+            <div id="browser-action-footer">
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">SELECT</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">CLOSE</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dedicated File Transfer Modal Scrim -->
+    <div id="browser-transfer-scrim" class="transfer-scrim-hidden">
+        <div id="browser-transfer-card">
+            <!-- Header with Operation Pill & Speed Badge -->
+            <div id="transfer-header">
+                <div id="transfer-top-bar">
+                    <div id="transfer-op-pill">
+                        <div class="transfer-pulse-dot"></div>
+                        <span id="transfer-op-title">COPYING TO STORAGE</span>
+                    </div>
+                    <div id="transfer-speed-box">
+                        <span class="transfer-speed-icon">⚡</span>
+                        <span id="transfer-speed-pill">0.0 MB/s</span>
+                    </div>
+                </div>
+                <div id="transfer-item-title">Processing...</div>
+                <div id="transfer-paths-box">
+                    <div class="transfer-path-row">
+                        <span class="transfer-path-tag">FROM</span>
+                        <span id="transfer-src-path" class="transfer-path-val">/mnt/usb0/...</span>
+                    </div>
+                    <div class="transfer-path-row">
+                        <span class="transfer-path-tag">TO</span>
+                        <span id="transfer-dst-path" class="transfer-path-val">/data/...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hero Progress Section -->
+            <div id="transfer-body">
+                <div id="transfer-hero-row">
+                    <span id="transfer-percent-num" class="transfer-hero-pct">0%</span>
+                    <div id="transfer-meta-stats">
+                        <span id="transfer-bytes-pill" class="transfer-meta-pill">0.0 MB / 0.0 MB</span>
+                        <span id="transfer-eta-pill" class="transfer-meta-pill">Calculating ETA...</span>
+                    </div>
+                </div>
+
+                <div id="transfer-track">
+                    <div id="transfer-fill"></div>
+                </div>
+            </div>
+
+            <!-- Footer with Cancel button -->
+            <div id="transfer-footer">
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">CANCEL OPERATION</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

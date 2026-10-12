@@ -1,0 +1,359 @@
+# =============================================================================
+# EVO Player - .gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# PROPRIETARY MATERIAL - never commit.
+# Sony SPRX/SELF modules, decrypted system libraries, console dumps, keys and
+# credentials belong in proprietary/ and must stay on the developer's machine.
+# See docs/proprietary.md for how to supply them locally.
+# -----------------------------------------------------------------------------
+proprietary/
+!proprietary/README.md
+!proprietary/.gitkeep
+
+# Belt and braces: these extensions never belong in this repo regardless of path
+*.sprx
+*.self
+*.elf.sig
+*.pkg
+*.pup
+*.sfo
+*.bin.enc
+*.key
+*.pem
+*.p12
+id_rsa*
+*_dump/
+sce_module/
+system_dump/
+
+# -----------------------------------------------------------------------------
+# Build output
+# -----------------------------------------------------------------------------
+/build/
+output/elf/*
+output/pkg/*
+output/logs/*
+!output/elf/.gitkeep
+!output/pkg/.gitkeep
+!output/logs/.gitkeep
+
+# Raw framebuffer captures: 6 MB each, uncompressed. Keep them local.
+# Curated PNGs for the docs live in docs/images/ instead.
+output/screenshots/
+
+# Scratch renders from inspecting the UI: uiview crops, zoomed regions,
+# de-tiled console captures. All reproducible from a capture plus ffmpeg.
+output/uicheck/
+output/blur-check/
+
+# Release-video project (Remotion + node_modules, captures, renders) and
+# loose scratch logs / test files dropped straight into output/.
+output/evolve/
+output/testfiles/
+output/*.log
+output/c123.md
+
+# Host benchmark binary (tools/bench.sh)
+output/bench/
+output/tests/
+output/coverage/
+
+# #8 codec-sweep corpus: ~160 MB of generated video. Reproduce it with
+# tools/make_sweep_clips.sh rather than carrying it in the repo.
+output/sweep_clips/
+
+# Subtitle-sync test SRT (tools/subsync_run.py) - regenerable, not source.
+output/subsync/
+# #102 auto-sync: host FFmpeg + harness (tools/subsync_host.sh), and the
+# Tears of Steel calibration/test set - all regenerable.
+output/host-ffmpeg/
+output/subsync-host/
+output/dualsub-host/
+output/dns-host/
+output/streamopts-host/
+output/hls-host/
+output/netconnect-host/
+output/iptv-epg-host/
+output/subsync-test/
+tests/fixtures/
+
+# Records the last launch time so tools/launch.sh can refuse to stack
+# instances. Machine-local state, not project state.
+output/.last-launch
+
+# Daemon ELFs cached by install-homebrew.sh --setup
+third_party/daemons/
+
+# python bytecode from the tools
+__pycache__/
+*.pyc
+
+*.o
+*.a
+*.so
+*.so.*
+*.elf
+!samples/**/*.elf
+*.d
+compile_commands.json
+.cache/
+.ccache/
+.env
+.env.local
+
+# -----------------------------------------------------------------------------
+# Vendored / fetched sources (pulled by scripts, not committed)
+# -----------------------------------------------------------------------------
+sdk/ps5-payload-sdk/
+third_party/ffmpeg/ffmpeg-*/
+third_party/ffmpeg/*.tar.*
+third_party/**/src/
+projects/prosperoplayer/
+
+# Local reference clone of the native-app build tail we fork in Phase 1b.
+# Kept on disk, never committed. See third_party/ProsperoLight/README.EVO.md
+# and docs/evo-pro/phase-1b-app-module.md.
+third_party/ProsperoLight/
+
+# Local reference clone: SvenGDK/SharpProspero (C# app-module SDK). Studied for
+# its sceAgc GPU draw path re: docs/evo-pro/gpu-rendering-plan.md. Never committed.
+third_party/SharpProspero/
+
+# Local reference clones: blackbearreloaded PS5 research repos (audio decoding +
+# AJM offload, GPU/sceAgc internals, hardware video decoding — H.264/HEVC/VP9/HDR
+# on libSceVideodec2, FW 6.02 + 12.70). Studied for native decode (#41) and audio.
+# Kept on disk, never committed.
+third_party/ps5-audio-decoding-research/
+third_party/ps5-gpu-research/
+third_party/ProsperoTV/
+third_party/ps5-hardware-video-decoding-research/
+
+# Local reference clones: FastCopy (Windows copy engine - chunked I/O, queueing
+# and collision handling) and Prospero-Explorer (C# PS5 FTP file manager).
+# Studied for the browser's file operations. Kept on disk, never committed.
+third_party/FastCopy/
+third_party/Prospero-Explorer/
+
+# Local reference clone: VivaLaVent/kodi-ps5 (Kodi PS5 port packaging and build system).
+# Kept on disk, never committed.
+third_party/kodi-ps5/
+
+# third_party/ps5-opengl/ is a git SUBMODULE (#77, render overhaul GL-1..GL-6),
+# pinned in .gitmodules — its tree is a gitlink, not committed content. Only the
+# local SDK build tree under it is ignored. The `third_party/**/src/` rule below
+# does not reach a submodule's gitlink.
+third_party/ps5-opengl/build/
+
+# -----------------------------------------------------------------------------
+# CMake / Ninja / Meson
+# -----------------------------------------------------------------------------
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+.ninja_deps
+.ninja_log
+build.ninja
+rules.ninja
+meson-info/
+meson-logs/
+meson-private/
+
+# -----------------------------------------------------------------------------
+# Editors / OS
+# -----------------------------------------------------------------------------
+.vscode/settings.local.json
+.vscode/ipch/
+.claude/settings.local.json
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -----------------------------------------------------------------------------
+# Local environment (may contain your console's IP)
+# -----------------------------------------------------------------------------
+.env
+.env.local
+
+# -----------------------------------------------------------------------------
+# Assembled GPU shader blobs. Checked in (guarded by pp/shaders/SHA256SUMS):
+# agc_ui_blobs.S .incbin's them into the eboot, same as pp/blobs/. Regenerate
+# with tools/build-shader.sh --all.
+# -----------------------------------------------------------------------------
+
+# Loose media / scratch dropped at the repo root during hardware testing.
+/*.mp4
+/*.mkv
+/*.264
+/*.265
+/*.h264
+/*.pptx
+/EVO-Player-Video-Script.md
+/bbb_au.bin
+/test_au.bin
+/moonlight_stream.cpp
+/native_agc_present.cpp
+
+# Promo material for the showcase video - thumbnails, listing copy, the Reddit
+# post, the deck and its script. None of it is part of the app, it is large and
+# binary, and it churns every time the video is re-cut. The .pptx and the
+# script are already covered above.
+/youtube_assets/
+/docs/video/
+
+# Release artifacts. `scripts/package-app.sh` writes output/, and the release
+# workflow collects a copy here; both are built, not sources.
+/dist/
+
+# Third-party UI reference screenshots (Samsung Tizen, Xbox dashboard, etc).
+# Local design reference only - not ours to redistribute.
+samples/*.jpg
+samples/*.jpeg
+samples/*.png
+
+# Host UI renders (tools/uiview.sh)
+output/uiview/
+
+# Host UI walkthrough (tools/uiplay.sh)
+output/uiplay/
+
+# Media dropped into samples/ for testing - including partial downloads.
+# samples/*.jpg and friends were already ignored; these are not images.
+samples/**/*.mkv
+samples/**/*.mp4
+samples/**/*.vob
+samples/**/*.ifo
+samples/**/*.bup
+samples/**/*.fdmdownload
+
+# NID database for reverse-engineering work. A ~13MB third-party download from
+# zecoxao/sce_symbols, not our source - sce_stubs/Makefile already fetches it
+# via NID_DB_URL, so committing a copy is dead weight of exactly the kind this
+# repo has deleted before.
+tools/re/aerolib.csv
+
+# Local test environment, media fixtures & scratch
+# Local test environment, media fixtures & scratch
+emby_config/
+emby_media/
+jellyfin_config/
+jellyfin_cache/
+nuvio_web/
+output/test-addon/
+scratch/
+
+
+
+
+# --- Phase 1b: native-app build tail --------------------------------------
+# Generated clean-room runtime shim (rebuilt locally by scripts/package-app.sh).
+tools/native-app/runtime/libc.prx
+
+# Native-app + other local dependency caches (SHA-pinned, rebuildable).
+.deps/
+
+# Packaged app-module output (scripts/package-app.sh).
+output/app/
+# build-dav1d.sh / build-ffmpeg.sh unpack third-party source here (24MB+)
+output/third_party/
+
+# Shader blobs ripped from game dumps (tools/shader-rip.py). Derived + 3rd-party
+# code - keep them local. Vet + copy a chosen blob into pp/blobs/ deliberately.
+output/shaderrip/
+
+# ad-hoc klog capture (tools/klog.sh writes the real ones to output/logs/klog/)
+/klog.txt
+projects/evoplayer/include/evo_build_id.h
+
+# Reference clone, studied but never vendored: its .pipe/LLPC shader chain is
+# the model for tools/build_agc_pipes.py and evo_agc_shader_header.c.
+# See docs/evo-pro/agc-bare-metal-ui.md.
+third_party/ps5-xash3d-halflife/
+
+# Local OpenCode / IDE tooling configs
+opencode.json
+opnecode.json
+
+# Loose capture/debug artifacts at the output root. The subdirectories below
+# are already ignored, but files dropped straight into output/ were not, so a
+# `git add -A` during a debugging session committed 1.3 MB of screenshots.
+output/*.png
+output/*.bmp
+output/*.jpg
+# ...and in any subdirectory of output/. The rules above only covered its
+# root, so a second debugging session committed another 300 KB of previews
+# from output/icons/.
+output/**/*.png
+output/**/*.bmp
+output/**/*.jpg
+output/icons/
+output/shots/
+output/hdr-clip/
+
+
+# Host FFmpeg reproduction (tools/host-ffmpeg-probe.sh) and its test media.
+# The binary is ~12 MB and the clips are whole movies pulled off the console.
+output/ffprobe-minimal
+output/probe/
+output/release/
+output/share/
+output/sample-4k-scope/
+output/testmedia/
+output/ts-probe/
+
+# #90: the provider bundle server stages a copy of assets/providers/ here, and
+# the uiview harness drops the provider seam's C objects here.
+output/provider-serve/
+output/uiview/obj/
+
+# Debris from the #90 / #91 hardware-debugging sessions. Kept on disk (some of
+# it is pulled-off-console evidence worth re-reading), just not tracked.
+/crash_note
+/temp.raw
+/crop_left.png
+/evo*.log
+/evo_shot_*
+/test_audio_decode.c
+tools/check_crash.py
+tools/dump_offsets.py
+# Test clips pulled off the console; whole movies, several MB to several GB.
+/*.ts
+/output/*.ts
+
+# Local media/marketing work - not source: personal IPTV playlist, the v0.11
+# teaser edit (clips, VO, renders), the Discord logo, local test videos and the
+# #103 upscaler comparison captures (tools/upcompare_run.py).
+/channels.m3u
+output/teaser/
+output/discord/
+output/testclips/
+output/upcompare/
+output/cycles/
+output/controllers/
+output/iptv-repro/
+
+# Cloned reference, GPL-3.0, kept on disk and never committed.
+third_party/ps5-homebrew-dev-protocol/
+
+# local search index (tools/rag)
+output/rag/
+
+# controller dumps (tools/dualsense_dump.py) hold a serial / Bluetooth address
+output/dualsense/
+
+# Generated output and nested repos
+output/dash/
+output/hui-snap/
+output/kp/
+output/netclips/
+output/test/
+third_party/ProsperoStore/
+
+# Decrypted console system binaries (ftpsrv SELF mode) - Sony proprietary, never committed
+output/re/
+# Local reference clones (e.g. AnyPS5) - kept on disk, never committed
+thirdparty/

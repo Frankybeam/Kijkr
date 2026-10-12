@@ -1,0 +1,822 @@
+/* =============================================================================
+ * EVO PLAYER - Surround Sound Studio (#106): 2.5D spatial soundstage
+ *
+ * Positions, sizes and live colours are set from EvoRmlApp::UpdateSurroundState;
+ * this sheet is the static look. Palette: navy #070d18 / #0a0e16 background,
+ * #0f182b panels, cyan #00cdff highlight, yellow #ffcd00 selection focus.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16dp;
+    color: #ffffff;
+    background-color: #0a0e16;
+    margin: 0;
+    padding: 0;
+    width: 1920dp;
+    height: 1080dp;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+#surround-pane {
+    position: absolute;
+    left: 152dp;
+    top: 0;
+    width: 1768dp;
+    height: 1080dp;
+}
+
+/* =============================== Header =============================== */
+
+#surround-header {
+    position: absolute;
+    left: 0;
+    top: 60dp;
+    width: 1704dp;
+    height: 62dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#surround-indicator {
+    width: 5dp;
+    height: 56dp;
+    background-color: #00cdff;
+    border-radius: 2dp;
+    margin-right: 18dp;
+}
+
+#surround-header-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+#surround-title {
+    display: block;
+    font-size: 34dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5dp;
+}
+
+#surround-subtitle {
+    display: block;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #8fa0b5;
+    letter-spacing: 1.2dp;
+    margin-top: 3dp;
+}
+
+/* ============================ Shared panels ============================ */
+
+.srd-panel {
+    position: absolute;
+    left: 0;
+    width: 408dp;
+    background-color: #0f182b;
+    border-width: 1dp;
+    border-color: #1f3150;
+    border-radius: 16dp;
+    padding: 14dp 18dp;
+}
+
+.srd-panel-heading {
+    display: block;
+    font-size: 13dp;
+    font-weight: bold;
+    color: #6f85a5;
+    letter-spacing: 1.5dp;
+    margin-bottom: 10dp;
+}
+
+.srd-heading-note {
+    font-size: 11dp;
+    color: #00cdff;
+    letter-spacing: 1dp;
+}
+
+/* ============================= Left column ============================= */
+
+#surround-left {
+    position: absolute;
+    left: 0;
+    top: 146dp;
+    width: 420dp;
+}
+
+#surround-actions {
+    display: flex;
+    flex-direction: column;
+}
+
+.srd-action {
+    width: 420dp;
+    height: 62dp;
+    background-color: #0f182b;
+    border-width: 1dp;
+    border-color: #1f3150;
+    border-radius: 14dp;
+    margin-bottom: 6dp;
+    padding-left: 20dp;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.srd-action-focused {
+    background-color: #16233c;
+    border-width: 2dp;
+    border-color: #ffcd00;
+}
+
+.srd-action-label {
+    display: block;
+    font-size: 16dp;
+    font-weight: bold;
+    letter-spacing: 0.4dp;
+}
+
+.srd-action-sub {
+    display: block;
+    font-size: 12dp;
+    letter-spacing: 0.3dp;
+    margin-top: 3dp;
+}
+
+#surround-monitor {
+    margin-top: 8dp;
+    width: 420dp;
+    height: 176dp;
+    background-color: #0f182b;
+    border-width: 1dp;
+    border-color: #1f3150;
+    border-radius: 16dp;
+    padding: 14dp 20dp;
+    display: flex;
+    flex-direction: column;
+}
+
+#surround-monitor-header {
+    display: block;
+    font-size: 12dp;
+    font-weight: bold;
+    color: #5e7392;
+    letter-spacing: 1.5dp;
+    margin-bottom: 8dp;
+}
+
+#surround-monitor-title {
+    display: block;
+    font-size: 20dp;
+    font-weight: bold;
+    color: #ecf3ff;
+}
+
+#surround-monitor-line1, #surround-monitor-line2 {
+    display: block;
+    font-size: 14dp;
+    color: #9eb2cc;
+    margin-top: 6dp;
+}
+
+#surround-monitor-status {
+    display: block;
+    font-size: 13dp;
+    font-weight: bold;
+    letter-spacing: 0.5dp;
+    margin-top: 12dp;
+}
+
+/* =============================== Stage =============================== */
+
+#surround-stage {
+    position: absolute;
+    left: 440dp;
+    top: 146dp;
+    width: 836dp;
+    height: 694dp;
+    background-color: #070d18;
+    border-width: 1dp;
+    border-color: #1e3352;
+    border-radius: 22dp;
+    overflow: hidden;
+}
+
+#srd-floor {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 836dp;
+    height: 694dp;
+}
+
+.srd-grid-h, .srd-grid-v {
+    position: absolute;
+    background-color: #00cdff12;
+}
+
+.srd-ring {
+    position: absolute;
+    border-width: 1.5dp;
+    border-color: #00cdff4c;
+    background-color: #00cdff05;
+}
+
+.srd-ring-label {
+    position: absolute;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #3f5a7c;
+    letter-spacing: 0.5dp;
+}
+
+#surround-stage-display {
+    position: absolute;
+    left: 238dp;
+    top: 14dp;
+    width: 360dp;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#surround-stage-display-bar {
+    width: 360dp;
+    height: 10dp;
+    border-radius: 5dp;
+    background-color: #00cdff;
+}
+
+#surround-stage-display-label {
+    display: block;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #54708f;
+    letter-spacing: 1.4dp;
+    margin-top: 6dp;
+}
+
+/* Listener: Lucide armchair + user-round (tools/gen_surround_icons.py),
+ * white art tinted from C++. 60 x 60, the head sits on the sweet spot. */
+#srd-listener {
+    position: absolute;
+    width: 60dp;
+    height: 60dp;
+}
+
+#srd-listener-glow {
+    position: absolute;
+    left: -6dp;
+    top: -8dp;
+    width: 72dp;
+    height: 72dp;
+    border-radius: 36dp;
+    background-color: #00cdff14;
+    border-width: 1dp;
+    border-color: #00cdff40;
+}
+
+#srd-listener-chair {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 60dp;
+    height: 60dp;
+}
+
+#srd-listener-person {
+    position: absolute;
+    left: 10dp;
+    top: -3dp;
+    width: 40dp;
+    height: 40dp;
+}
+
+#srd-listener-label {
+    position: absolute;
+    width: 160dp;
+    text-align: center;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 0.8dp;
+}
+
+/* ---------------------------- Speakers ---------------------------- */
+
+.srd-spk {
+    position: absolute;
+    width: 124dp;
+    height: 70dp;
+}
+
+/* the cabinet's lower face - the one 2.5D depth cue per speaker */
+.srd-spk-base {
+    position: absolute;
+    left: 4dp;
+    top: 10dp;
+    width: 120dp;
+    height: 60dp;
+    border-radius: 12dp;
+    background-color: #050a13;
+}
+
+.srd-spk-cab {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 120dp;
+    height: 62dp;
+    background-color: #0d1626;
+    border-radius: 12dp;
+    border-width: 1dp;
+    border-color: #223751;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding-left: 9dp;
+    padding-right: 8dp;
+}
+
+.srd-spk-selected .srd-spk-cab {
+    border-width: 2dp;
+    border-color: #ffcd00;
+}
+
+/* Lucide "speaker", two layers on one 44 x 44 canvas so the woofer lights
+ * on its own; the glow disc behind it is the illumination ring. */
+.srd-spk-icon {
+    position: relative;
+    width: 44dp;
+    height: 44dp;
+    margin-right: 6dp;
+}
+
+.srd-spk-img {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 44dp;
+    height: 44dp;
+}
+
+.srd-spk-glow {
+    position: absolute;
+    left: 9dp;
+    top: 13dp;
+    width: 26dp;
+    height: 26dp;
+    border-radius: 13dp;
+    background-color: #00cdff00;
+}
+
+.srd-spk-meta {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex-grow: 1;
+}
+
+.srd-spk-label {
+    display: block;
+    font-size: 15dp;
+    font-weight: bold;
+    letter-spacing: 0.6dp;
+    color: #ecf3ff;
+}
+
+.srd-spk-sub {
+    display: block;
+    font-size: 10dp;
+    font-weight: bold;
+    color: #728aa7;
+    margin-top: 2dp;
+}
+
+.srd-spk-vu {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 6dp;
+    margin-left: 4dp;
+}
+
+.vu-bar {
+    width: 6dp;
+    height: 7dp;
+    border-radius: 1.5dp;
+    background-color: #18263a;
+    margin-bottom: 2dp;
+}
+
+.srd-spk-wave {
+    position: absolute;
+    width: 110dp;
+    height: 110dp;
+    border-radius: 55dp;
+    border-width: 2dp;
+    display: none;
+}
+
+/* ------------------------------ Orb ------------------------------ */
+
+.srd-arc-dot {
+    position: absolute;
+    width: 4dp;
+    height: 4dp;
+    border-radius: 2dp;
+    background-color: #00cdff;
+}
+
+.srd-trail {
+    position: absolute;
+    background-color: #00cdff;
+}
+
+#srd-orb-shadow {
+    position: absolute;
+    background-color: #0000008c;
+    border-width: 1dp;
+    border-color: #00cdff40;
+}
+
+#srd-orb-stem {
+    position: absolute;
+    width: 1dp;
+    background-color: #00cdff73;
+}
+
+.srd-orb-ripple {
+    position: absolute;
+    width: 104dp;
+    height: 104dp;
+    border-radius: 52dp;
+    border-width: 2dp;
+}
+
+#srd-orb-glow {
+    position: absolute;
+    background-color: #00cdff2e;
+}
+
+#srd-orb {
+    position: absolute;
+    background-color: #00cdff;
+    border-width: 2dp;
+    border-color: #e9fbff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#srd-orb-core {
+    background-color: #ffffff;   /* size set with the orb, from C++ */
+}
+
+#srd-orb-tag {
+    position: absolute;
+    width: 120dp;
+    text-align: center;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #bfefff;
+    letter-spacing: 0.6dp;
+}
+
+/* =========================== Telemetry strip =========================== */
+
+#surround-telemetry {
+    position: absolute;
+    left: 440dp;
+    top: 852dp;
+    width: 836dp;
+    height: 78dp;
+    background-color: #0f182b;
+    border-width: 1dp;
+    border-color: #1f3150;
+    border-radius: 16dp;
+    padding: 12dp 16dp;
+}
+
+#srd-tele-cells {
+    display: flex;
+    flex-direction: row;
+}
+
+.srd-tele-cell {
+    width: 100dp;
+    display: flex;
+    flex-direction: column;
+}
+
+.srd-tele-key {
+    display: block;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #5e7392;
+    letter-spacing: 1dp;
+}
+
+.srd-tele-val {
+    display: block;
+    font-size: 20dp;
+    font-weight: bold;
+    color: #ecf3ff;
+    margin-top: 4dp;
+}
+
+#srd-cal-progress {
+    display: none;
+    flex-direction: column;
+}
+
+#srd-cal-progress-text {
+    display: block;
+    font-size: 18dp;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 0.6dp;
+}
+
+#srd-cal-progress-track {
+    margin-top: 10dp;
+    width: 800dp;
+    height: 8dp;
+    border-radius: 4dp;
+    background-color: #18263a;
+}
+
+#srd-cal-progress-fill {
+    display: block;
+    width: 0;
+    height: 8dp;
+    border-radius: 4dp;
+    background-color: #00cdff;
+}
+
+/* ============================ Right column ============================ */
+
+#surround-right {
+    position: absolute;
+    left: 1296dp;
+    top: 146dp;
+    width: 408dp;
+    height: 784dp;
+}
+
+#srd-levels-panel   { top: 0;     height: 300dp; }
+#srd-controls-panel { top: 312dp; height: 150dp; }
+#srd-quick-panel    { top: 474dp; height: 150dp; }
+#srd-output-panel   { top: 636dp; height: 148dp; }
+#srd-cal-panel      { top: 0;     height: 784dp; display: none; }
+
+.srd-lvl-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    height: 30dp;
+}
+
+.srd-lvl-name {
+    width: 46dp;
+    font-size: 13dp;
+    font-weight: bold;
+    color: #c9d6e8;
+}
+
+.srd-lvl-track {
+    flex-grow: 1;
+    height: 8dp;
+    border-radius: 4dp;
+    background-color: #18263a;
+    margin-left: 8dp;
+    margin-right: 10dp;
+}
+
+.srd-lvl-fill {
+    display: block;   /* RmlUi has no UA sheet: a bare div is inline */
+    height: 8dp;
+    width: 0;
+    border-radius: 4dp;
+    background-color: #00cdff;
+}
+
+.srd-lvl-pct {
+    width: 44dp;
+    text-align: right;
+    font-size: 13dp;
+    font-weight: bold;
+    color: #8fa3bf;
+}
+
+.srd-ctl-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    height: 36dp;
+}
+
+.srd-ctl-text {
+    margin-left: 10dp;
+    font-size: 14dp;
+    color: #b6c5da;
+}
+
+#srd-quick-cards {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.srd-qm {
+    width: 116dp;
+    height: 90dp;
+    border-radius: 12dp;
+    background-color: #0b1322;
+    border-width: 1dp;
+    border-color: #223751;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.srd-qm-selected {
+    background-color: #16233c;
+    border-width: 2dp;
+    border-color: #ffcd00;
+}
+
+.srd-qm-icon {
+    position: relative;
+    width: 34dp;
+    height: 34dp;
+    margin-bottom: 8dp;
+}
+
+.srd-qm-label {
+    display: block;
+    font-size: 12dp;
+    font-weight: bold;
+    letter-spacing: 1dp;
+    color: #9eb2cc;
+}
+
+.srd-qm-selected .srd-qm-label { color: #ffcd00; }
+
+/* quick-mode glyphs, drawn from boxes */
+.qm-manual-h { position: absolute; left: 3dp;  top: 16dp; width: 28dp; height: 2dp; background-color: #6f85a5; }
+.qm-manual-v { position: absolute; left: 16dp; top: 3dp;  width: 2dp;  height: 28dp; background-color: #6f85a5; }
+.qm-manual-dot { position: absolute; left: 11dp; top: 11dp; width: 12dp; height: 12dp; border-radius: 6dp; background-color: #00cdff; }
+.qm-orbit-ring { position: absolute; left: 3dp; top: 3dp; width: 28dp; height: 28dp; border-radius: 14dp; border-width: 2dp; border-color: #6f85a5; }
+.qm-orbit-dot { position: absolute; left: 23dp; top: 1dp; width: 10dp; height: 10dp; border-radius: 5dp; background-color: #00cdff; }
+.qm-flyby-line { position: absolute; left: 16dp; top: 2dp; width: 2dp; height: 26dp; background-color: #6f85a5; }
+.qm-flyby-head { position: absolute; left: 11dp; top: 22dp; width: 12dp; height: 12dp; border-radius: 6dp; background-color: #00cdff; }
+
+.srd-out-line {
+    display: block;
+    font-size: 14dp;
+    color: #b6c5da;
+    margin-top: 6dp;
+}
+
+/* ----------------------------- Calibration ----------------------------- */
+
+.srd-cal-step {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    height: 26dp;
+}
+
+.srd-cal-dot {
+    width: 10dp;
+    height: 10dp;
+    border-radius: 5dp;
+    background-color: #2a3d5c;
+    margin-right: 10dp;
+}
+
+.srd-cal-step-text {
+    font-size: 13dp;
+    font-weight: bold;
+    letter-spacing: 0.4dp;
+    color: #6f85a5;
+}
+
+#srd-cal-text {
+    display: block;
+    margin-top: 12dp;
+    height: 64dp;
+    font-size: 14dp;
+    color: #d6e2f2;
+    line-height: 20dp;
+}
+
+#srd-cal-mic {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    height: 30dp;
+    margin-bottom: 8dp;
+}
+
+.srd-cal-mic-key {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #6f85a5;
+    letter-spacing: 0.8dp;
+}
+
+.srd-cal-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    height: 30dp;
+    border-bottom-width: 1dp;
+    border-bottom-color: #18263a;
+}
+
+.srd-cal-head { height: 24dp; }
+.srd-cal-head div { font-size: 11dp; color: #5e7392; letter-spacing: 1dp; }
+
+.srd-cal-c0 { width: 60dp;  font-size: 14dp; font-weight: bold; color: #ecf3ff; }
+.srd-cal-c1 { width: 104dp; font-size: 14dp; color: #c9d6e8; text-align: right; }
+.srd-cal-c2 { width: 104dp; font-size: 14dp; color: #c9d6e8; text-align: right; }
+.srd-cal-c3 { width: 100dp; font-size: 14dp; color: #c9d6e8; text-align: right; }
+
+#srd-cal-note {
+    display: block;
+    margin-top: 10dp;
+    font-size: 11dp;
+    color: #5e7392;
+    line-height: 15dp;
+}
+
+/* =============================== Footer =============================== */
+
+#surround-footer {
+    position: absolute;
+    top: 960dp;
+    left: 0;
+    width: 1704dp;
+    height: 48dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-right: 26dp;
+}
+
+.glyph-badge {
+    width: 36dp;
+    height: 36dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 18dp;
+    background-color: #142850;
+    margin-right: 6dp;
+}
+
+.glyph-badge-img {
+    width: 24dp;
+    height: 24dp;
+}
+
+.glyph-pill {
+    display: block;
+    height: 26dp;
+    line-height: 24dp;
+    padding: 0 9dp;
+    border-radius: 13dp;
+    background-color: #142850;
+    border-width: 1dp;
+    border-color: #2c4a7a;
+    font-size: 12dp;
+    font-weight: bold;
+    color: #d6e2f2;
+    letter-spacing: 0.6dp;
+    margin-right: 6dp;
+}
+
+.footer-text {
+    font-size: 14dp;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1dp;
+}

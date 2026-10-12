@@ -1,0 +1,1515 @@
+#include "evo/services/CoverArtService.hpp"
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#include "../../../stb_image.h"
+
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libswscale/swscale.h>
+#include <libavutil/mathematics.h>
+#include <libavutil/mem.h>
+#include <libavutil/pixdesc.h>
+#include <unistd.h>
+}
+
+#include "evo_boot_trace.h"
+#include "evo_boot_log.h"
+#include "evo_crash_note.h"
+#include "evo_vdec.h"
+#include "pp_frame.h"
+
+#include <cstdio>
+#include <cstring>
+#include <algorithm>
+
+namespace evo {
+#ifdef EVO_APP_MODULE
+/*
+ * Flexible memory is what actually runs out here.
+ *
+ * On the app module malloc() comes from the flexible-memory heap (see
+ * evo_direct_mem.c), which is the same pool the resident sceVideodec2
+ * decoders reserve out of at boot - five of them since #41 Phase D.
+ *
+ * Not in the SDK headers; the symbol is in the linked libkernel, declared the
+ * same way evo_vdec_native.c declares sceKernelGetDirectMemorySize().
+ */
+extern "C" int sceKernelAvailableFlexibleMemorySize(size_t *size);
+
+static size_t availableFlexBytes() {
+    size_t avail = 0;
+    if (sceKernelAvailableFlexibleMemorySize(&avail) != 0)
+        return 0;          /* unknown - callers treat 0 as "do not gate" */
+    return avail;
+}
+#else
+static size_t availableFlexBytes() { return 0; }
+#endif
+
+extern "C" void evo_log_alloc_state(const char *when);
+
+static bool isSw4kAllowed() {
+    static int allowed = -1;
+    if (allowed < 0) {
+        allowed = (access("/mnt/usb0/evo_no_sw_4k", F_OK) == 0) ? 0 : 1;
+    }
+    return allowed != 0;
+}
+
+struct ThumbTimeout {
+    double deadlineSec;
+};
+
+static double thumbNowSec() {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
+    return static_cast<double>(ts.tv_sec) + static_cast<double>(ts.tv_nsec) / 1e9;
+}
+
+static int thumbInterruptCb(void* opaque) {
+    if (!opaque) return 0;
+    auto* t = static_cast<ThumbTimeout*>(opaque);
+    if (t->deadlineSec <= 0.0) return 0;
+    return thumbNowSec() >= t->deadlineSec ? 1 : 0;
+}
+
+/*
+ * The decoders fault rather than fail when a picture buffer cannot be
+ * allocated - libavcodec logs "get_buffer() failed" and the HEVC decoder then
+ * walks into its own error path and dereferences null. That log line is the
+ * last thing in the register dump from the EVO_TEST_hevc8_4k.mp4 crash, but
+ * libavcodec writes it to its own av_log, which goes nowhere here, and it
+ * never says how much it was asking for.
+ *
+ * Wrapping the allocator puts the size in evo.log, flushed before the fault
+ * lands. It is also the seam a fix would go in: a get_buffer2 that can satisfy
+ * the request from a reserve never returns the error that triggers the fault.
+ */
+static int thumbGetBuffer(AVCodecContext* avctx, AVFrame* frame, int flags) {
+    int ret = avcodec_default_get_buffer2(avctx, frame, flags);
+    if (ret < 0) {
+        /*
+         * Report the context, not the frame. libavcodec's video_get_buffer()
+         * calls av_frame_unref() on its own failure path, which resets the
+         * frame's width, height and format - so reading them here showed
+         * "0x0 fmt=-1" for what was actually a full-size request, and sent me
+         * looking for a format problem that did not exist. The context's
+         * fields survive and are what the allocation was sized from.
+         */
+        evo_bt("extractVideoFrame: get_buffer2 FAILED ctx=%dx%d coded=%dx%d pix=%d rc=%d",
+               avctx->width, avctx->height,
+               avctx->coded_width, avctx->coded_height,
+               avctx->pix_fmt, ret);
+        evo_bt("extractVideoFrame: flex %zuMB free at failure",
+               availableFlexBytes() / (1024u * 1024u));
+        evo_boot_log_flush();
+    }
+    return ret;
+}
+
+/*
+ * Bit depth from an hvcC configuration record, or 0 if this is not one.
+ *
+ * Needed because the gates below run BEFORE avformat_find_stream_info(), and
+ * that is where `format` and `bits_per_raw_sample` get filled in: until then
+ * both MP4 and MKV report a 10-bit HEVC stream as depth-unknown, every gate
+ * reads it as 8-bit, and a 4K HDR file walks straight into the software
+ * decoder. Measured, not assumed - EVO_TEST_hevc10_pq_4k.mp4 sailed past the
+ * capability gate for exactly this reason and was caught two gates later by
+ * the flexible-memory floor.
+ *
+ * The record is the same in both containers (MKV keeps it in CodecPrivate),
+ * and the field is at a fixed offset - ISO/IEC 14496-15 8.3.3.1.2:
+ *
+ *   [0]      configurationVersion (1)
+ *   [1]      profile_space(2) tier_flag(1) profile_idc(5)
+ *   [2..5]   profile_compatibility_flags
+ *   [6..11]  constraint_indicator_flags
+ *   [12]     level_idc
+ *   [13..14] min_spatial_segmentation_idc
+ *   [15]     parallelismType
+ *   [16]     chromaFormat
+ *   [17]     bitDepthLumaMinus8      <- this
+ *   [18]     bitDepthChromaMinus8
+ */
+static int hvccBitDepth(const AVCodecParameters* par) {
+    if (!par || par->codec_id != AV_CODEC_ID_HEVC)
+        return 0;
+    const uint8_t* e = par->extradata;
+    if (!e || par->extradata_size < 23)
+        return 0;
+    if (e[0] != 1)                     /* not a configuration record (an
+                                        * Annex-B start code fails this too) */
+        return 0;
+    return 8 + (e[17] & 0x07);
+}
+
+/*
+ * 10-bit reaches codecpar as a pixel format from some containers and as a
+ * raw-sample depth from others; both spellings mean the same thing to the
+ * decoder gates, and a stream that says neither is 8-bit - unless the
+ * container's configuration record can be read directly, which is the only
+ * way to know before find_stream_info has run.
+ */
+static int codecparBitDepth(const AVCodecParameters* par) {
+    if (!par)
+        return 8;
+    if (par->format == AV_PIX_FMT_YUV420P10LE || par->format == AV_PIX_FMT_YUV420P10BE)
+        return 10;
+    if (par->bits_per_raw_sample > 8)
+        return par->bits_per_raw_sample;
+    const int hvcc = hvccBitDepth(par);
+    return hvcc > 0 ? hvcc : 8;
+}
+
+/*
+ * Arms the crash note for as long as it is in scope.
+ *
+ * The note has to be cleared on every way out of the extractor, and the
+ * extractor has a dozen of them - an early return that forgets leaves a file
+ * marked as in flight, and the next crash anywhere quarantines the wrong one.
+ * A scope guard cannot forget. `disarm()` is for handing the file on to a path
+ * that wants a different stage, or none.
+ */
+class CrashNoteScope {
+public:
+    CrashNoteScope(const char* path, evo_crash_stage_t stage) {
+        evo_crash_note_set(path, stage);
+    }
+    ~CrashNoteScope() { evo_crash_note_set(nullptr, EVO_CRASH_STAGE_PROBE); }
+    void disarm() { evo_crash_note_set(nullptr, EVO_CRASH_STAGE_PROBE); }
+
+    CrashNoteScope(const CrashNoteScope&) = delete;
+    CrashNoteScope& operator=(const CrashNoteScope&) = delete;
+};
+
+/*
+ * Decode one poster frame on the hardware decoder.
+ *
+ * This exists because FFmpeg's software HEVC decoder faults rather than fails
+ * when a picture buffer cannot be allocated, and EVO_TEST_hevc8_4k.mp4 makes
+ * it do exactly that - a file the hardware decoder plays start to finish
+ * without complaint. Going through the same decoder playback uses turns the
+ * worst case from "the process dies" into "sceVideodec2 returns an error",
+ * and a 4K frame arrives in a fraction of the time software takes.
+ *
+ * Returns false when the hardware path was not available or produced nothing;
+ * the caller then runs its own avcodec path, so this is only ever an
+ * improvement on the files it accepts. The format context is left rewound so
+ * that fallback starts from a sane position.
+ *
+ * Only ever called off the player screen: the resident decoder is claimed for
+ * the whole of a playing file, so during playback the open below fails the
+ * slot check and we fall back - which is what we want, both for correctness
+ * and because a poster must never disturb the picture.
+ */
+static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstream,
+                                   double seekSec, uint32_t* outPixels,
+                                   int targetWidth, int targetHeight)
+{
+    if (!fmt || !st || !st->codecpar || !outPixels)
+        return false;
+
+    const int bitDepth = codecparBitDepth(st->codecpar);
+
+    if (!evo_vdec_native_can_open(st->codecpar->codec_id, st->codecpar->profile,
+                                  bitDepth, st->codecpar->width,
+                                  st->codecpar->height))
+        return false;
+
+    evo_vdec_open_params np;
+    std::memset(&np, 0, sizeof(np));
+    np.backend        = EVO_VDEC_BACKEND_NATIVE;
+    np.codec_id       = st->codecpar->codec_id;
+    np.width          = st->codecpar->width;
+    np.height         = st->codecpar->height;
+    np.extradata      = st->codecpar->extradata;
+    np.extradata_size = st->codecpar->extradata_size;
+    np.avctx_params   = st->codecpar;
+    np.thread_count     = EVO_VDEC_KEEP;
+    np.thread_type      = EVO_VDEC_KEEP;
+    np.skip_loop_filter = EVO_VDEC_KEEP;
+    np.skip_frame       = EVO_VDEC_KEEP;
+    np.skip_idct        = EVO_VDEC_KEEP;
+
+    evo_vdec_backend chosen = EVO_VDEC_BACKEND_FFMPEG;
+    evo_vdec* dec = evo_vdec_open(&np, &chosen);
+    if (!dec)
+        return false;
+    if (chosen != EVO_VDEC_BACKEND_NATIVE) {
+        /* Downgraded - the slot is busy or the stream was refused. The
+         * caller's own avcodec path is better tuned than this one would be. */
+        evo_vdec_close(dec);
+        return false;
+    }
+
+    evo_bt("extractVideoFrame: hardware decoder for the poster");
+    evo_boot_log_flush();
+
+    AVPacket* pkt = av_packet_alloc();
+    if (!pkt) {
+        evo_vdec_close(dec);
+        return false;
+    }
+    pp_frame pf;
+    bool success = false;
+    bool dark = false;
+
+    /*
+     * Demo reels (the LG 4K HDR set) open on black and fade in, so the frame at
+     * the first spot tried can be pure black. A dark poster is kept as the
+     * fallback, but two later positions are tried before settling for it.
+     */
+    const double dur = (fmt->duration > 0)
+                     ? static_cast<double>(fmt->duration) / static_cast<double>(AV_TIME_BASE) : 0.0;
+    const double seekTries[3] = { seekSec, dur * 0.35, dur * 0.6 };
+    for (int pass = 0; pass < 3; ++pass) {
+    /* No duration (an MKV remuxed from TS, raw streams): jump by file position
+     * instead, which needs no timestamps. */
+    const int64_t fileBytes = fmt->pb ? avio_size(fmt->pb) : 0;
+    const bool byBytes = dur < 3.0 && fileBytes > (1 << 20);
+    if (pass > 0 && (!dark || (dur < 3.0 && !byBytes))) {
+        evo_bt("extractVideoFrame: poster pass %d stops: dark=%d dur=%.1f", pass, (int)dark, dur);
+        break;
+    }
+    const double trySec = seekTries[pass];
+    evo_bt("extractVideoFrame: poster pass %d at %s (dur %.1fs)", pass,
+           byBytes ? (pass == 0 ? "start" : "file position") : "time", dur);
+    int maxPackets = 48;
+    if (byBytes && pass > 0) {
+        const int64_t pos = (int64_t)((double)fileBytes * (pass == 1 ? 0.25 : 0.55));
+        /* Lands mid-GOP: the decoder drops pictures until the next IRAP, so
+         * give it room to find one. */
+        maxPackets = 600;
+        if (avformat_seek_file(fmt, -1, INT64_MIN, pos, INT64_MAX, AVSEEK_FLAG_BYTE) < 0)
+            av_seek_frame(fmt, vstream, 0, AVSEEK_FLAG_BACKWARD);
+    } else if (trySec > 0.0 && st->time_base.den > 0) {
+        int64_t seekTs = static_cast<int64_t>(trySec / av_q2d(st->time_base));
+        if (seekTs < 0) seekTs = 0;
+        if (av_seek_frame(fmt, vstream, seekTs, AVSEEK_FLAG_BACKWARD) < 0)
+            av_seek_frame(fmt, vstream, 0, AVSEEK_FLAG_BACKWARD);
+    }
+    /*
+     * Always flush after the seek, exactly as the play loop does, even though
+     * the decoder was opened moments ago. The flush is what rebuilds the
+     * mp4toannexb filter, and a fresh filter is what re-injects the parameter
+     * sets on its first output packet. Without it every HEVC poster failed
+     * (`Decode FAIL err=1`, no frames) while every H.264 one succeeded -
+     * the same split evo_vdec_native.c documents on seek, because AVC streams
+     * tend to repeat SPS/PPS in-band per keyframe and HEVC ones keep them in
+     * hvcC extradata only.
+     */
+    evo_vdec_flush(dec);
+
+    std::memset(&pf, 0, sizeof(pf));
+    bool gotFrame = false;
+    int packetCount = 0;
+
+    while (!gotFrame && packetCount < maxPackets && av_read_frame(fmt, pkt) >= 0) {
+        packetCount++;
+        if (pkt->stream_index == vstream) {
+            int64_t pts = (pkt->pts != AV_NOPTS_VALUE)
+                        ? av_rescale_q(pkt->pts, st->time_base, AVRational{1, 1000000})
+                        : INT64_MIN;
+            /* send() > 0 means the reorder buffer is full: drain and retry the
+             * same unit, exactly as the play loop does. */
+            for (int attempt = 0; attempt < 8; ++attempt) {
+                int sent = evo_vdec_send(dec, pkt->data, pkt->size, pts);
+                if (sent < 0) { packetCount = maxPackets; break; }
+                if (evo_vdec_receive(dec, &pf) == 1) gotFrame = true;
+                if (sent == 0) break;
+                if (gotFrame) break;
+            }
+        }
+        av_packet_unref(pkt);
+    }
+
+    if (!gotFrame) {          /* flush whatever is still held back */
+        evo_vdec_send(dec, nullptr, 0, INT64_MIN);
+        gotFrame = (evo_vdec_receive(dec, &pf) == 1);
+    }
+
+    if (gotFrame && pf.planes[0] && pf.width > 0 && pf.height > 0) {
+        /*
+         * 10-bit two-plane needs shifting before swscale can read it.
+         *
+         * sceVideodec2's 10-bit surface is NOT P010. It carries one 16-bit word
+         * per component with the ten sample bits in 9:0 - low-aligned - which
+         * the research notes measured directly ("not conventional MSB-aligned
+         * P010 ... essentially no image samples in bits 15:10", hdr.md) and
+         * which the present path already compensates for: the shader multiplies
+         * every sample by 64.0615844 (= 65535/1023), see
+         * shaders/agc/video_yuv_p010_hdr.pipe.
+         *
+         * Handing that straight to swscale as AV_PIX_FMT_P010LE - which IS
+         * MSB-aligned - reads every sample 64x too small. Luma goes to black
+         * and chroma collapses to zero instead of its midpoint, which renders
+         * as flat green. That is the green HDR thumbnails, and it only became
+         * visible on every HDR file once the HEVC10 slot started succeeding at
+         * 4K, because until then these files fell back to the software path,
+         * whose YUV420P10LE really is low-aligned and so looked correct.
+         *
+         * Shift into P010's alignment rather than inventing a pixel format:
+         * one pass, and swscale then does the scale and the matrix as usual.
+         */
+        pp_frame shifted = pf;
+        uint16_t* shiftBuf = nullptr;
+        if (pf.format == PP_FRAME_NV12_10 && pf.planes[1]) {
+            const size_t yWords  = (size_t)(pf.strides[0] / 2) * pf.height;
+            const size_t uvWords = (size_t)(pf.strides[1] / 2) * ((pf.height + 1) / 2);
+            shiftBuf = (uint16_t*)av_malloc((yWords + uvWords) * sizeof(uint16_t));
+            if (shiftBuf) {
+                const uint16_t* srcY = (const uint16_t*)pf.planes[0];
+                uint16_t* dstY = shiftBuf;
+                for (size_t i = 0; i < yWords; ++i)
+                    dstY[i] = (uint16_t)((srcY[i] & 0x03FF) << 6);
+                const uint16_t* srcUV = (const uint16_t*)pf.planes[1];
+                uint16_t* dstUV = shiftBuf + yWords;
+                for (size_t i = 0; i < uvWords; ++i)
+                    dstUV[i] = (uint16_t)((srcUV[i] & 0x03FF) << 6);
+                shifted.planes[0] = (uint8_t*)dstY;
+                shifted.planes[1] = (uint8_t*)dstUV;
+            } else {
+                evo_bt("extractVideoFrame: 10-bit shift buffer alloc failed "
+                       "(%zu words) - skipping the hardware poster",
+                       yWords + uvWords);
+                evo_boot_log_flush();
+            }
+        }
+        const pp_frame& src = shiftBuf ? shifted : pf;
+
+        enum AVPixelFormat srcFormat;
+        switch (pf.format) {
+            case PP_FRAME_NV12:     srcFormat = AV_PIX_FMT_NV12;       break;
+            case PP_FRAME_YUV420P:  srcFormat = AV_PIX_FMT_YUV420P;    break;
+            /* Only correct because of the shift above; without shiftBuf the
+             * data is still low-aligned, so refuse rather than draw green. */
+            case PP_FRAME_NV12_10:  srcFormat = shiftBuf ? AV_PIX_FMT_P010LE
+                                                         : AV_PIX_FMT_NONE;  break;
+            case PP_FRAME_YUV420P10:srcFormat = AV_PIX_FMT_YUV420P10LE;break;
+            default:                srcFormat = AV_PIX_FMT_NONE;       break;
+        }
+
+        SwsContext* sws = (srcFormat == AV_PIX_FMT_NONE) ? nullptr : sws_getContext(
+            static_cast<int>(pf.width), static_cast<int>(pf.height), srcFormat,
+            targetWidth, targetHeight, AV_PIX_FMT_RGBA,
+            SWS_BILINEAR, nullptr, nullptr, nullptr);
+
+        if (sws) {
+            const uint8_t* srcData[4] = { src.planes[0], src.planes[1],
+                                          src.planes[2], src.planes[3] };
+            int srcLines[4] = { src.strides[0], src.strides[1],
+                                src.strides[2], src.strides[3] };
+            uint8_t* dst[4] = { reinterpret_cast<uint8_t*>(outPixels), nullptr, nullptr, nullptr };
+            int dstLines[4] = { targetWidth * 4, 0, 0, 0 };
+            sws_scale(sws, srcData, srcLines, 0, static_cast<int>(pf.height), dst, dstLines);
+            sws_freeContext(sws);
+            success = true;
+            /* Brightness of what was produced: tells a black poster (decoder
+             * or conversion) from a dark one (PQ shown as SDR, fade-in frame). */
+            unsigned long long sumY = 0;
+            unsigned maxC = 0;
+            const uint8_t* px = reinterpret_cast<const uint8_t*>(outPixels);
+            const size_t npx = (size_t)targetWidth * targetHeight;
+            for (size_t i = 0; i < npx; ++i, px += 4) {
+                sumY += (px[0] + px[1] + px[2]) / 3;
+                if (px[0] > maxC) maxC = px[0];
+                if (px[1] > maxC) maxC = px[1];
+                if (px[2] > maxC) maxC = px[2];
+            }
+            evo_bt("extractVideoFrame: hardware poster ok %ux%u fmt=%d%s mean=%llu max=%u",
+                   pf.width, pf.height, (int)pf.format,
+                   shiftBuf ? " (10-bit shifted)" : "",
+                   npx ? sumY / npx : 0ULL, maxC);
+            evo_boot_log_flush();
+            dark = (npx == 0) || (sumY / npx) < 10;
+        }
+        if (shiftBuf)
+            av_freep(&shiftBuf);
+    }
+    }   /* for pass */
+
+    av_packet_free(&pkt);
+    evo_vdec_close(dec);     /* releases the resident slot */
+
+    if (!success) {
+        /* Put the demuxer back where the caller's own path expects it. */
+        av_seek_frame(fmt, vstream, 0, AVSEEK_FLAG_BACKWARD);
+        evo_bt("extractVideoFrame: hardware poster produced nothing -> FFmpeg");
+        evo_boot_log_flush();
+    }
+    return success;
+}
+
+CoverArtService::CoverArtService() {
+    /* Resolve the quarantine path before the first extraction, so the crash
+     * handler has a stable buffer to write into if one takes us down. */
+    evo_crash_note_init();
+    m_cache.resize(CacheCapacity);
+    for (auto& entry : m_cache) {
+        entry.pixels.resize(PosterWidth * PosterHeight, 0);
+    }
+    m_heroArtPixels.resize(HeroWidth * HeroHeight, 0);
+    m_browserPreviewPixels.resize(PreviewWidth * PreviewHeight, 0);
+}
+
+void CoverArtService::clearCache() {
+    pthread_mutex_lock(&m_jobMutex);
+    m_generation++;                 /* results already in flight are discarded */
+    m_posterJobs.clear();
+    m_hasPreviewJob = false;
+    pthread_mutex_unlock(&m_jobMutex);
+    m_pendingPosters.clear();
+    m_previewPending = false;
+    for (auto& entry : m_cache) {
+        entry.pathKey.clear();
+        entry.valid = false;
+        entry.tried = false;
+        std::fill(entry.pixels.begin(), entry.pixels.end(), 0);
+    }
+    m_heroArtPath.clear();
+    m_heroArtValid = false;
+    std::fill(m_heroArtPixels.begin(), m_heroArtPixels.end(), 0);
+
+    m_browserPreviewPath.clear();
+    m_browserPreviewValid = false;
+    m_browserPreviewFailed = false;
+    std::fill(m_browserPreviewPixels.begin(), m_browserPreviewPixels.end(), 0);
+}
+
+bool CoverArtService::isVideoFile(const std::string& path) const {
+    if (path.empty()) return false;
+    size_t dot = path.find_last_of('.');
+    if (dot == std::string::npos || dot + 1 >= path.size()) return false;
+
+    std::string ext = path.substr(dot);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+    return (ext == ".mkv"  || ext == ".mp4"  || ext == ".mov" ||
+            ext == ".m4v"  || ext == ".avi"  || ext == ".webm" ||
+            ext == ".ts"   || ext == ".m2ts" || ext == ".mpg" ||
+            ext == ".mpeg" || ext == ".wmv"  || ext == ".flv" ||
+            ext == ".asf"  || ext == ".wm"   || ext == ".rm"  ||
+            ext == ".rmvb" || ext == ".ogv"  || ext == ".dv"  ||
+            ext == ".mxf"  || ext == ".mts"  || ext == ".vob" ||
+            ext == ".m2v"  || ext == ".3gp"  || ext == ".3g2" ||
+            ext == ".mp2"  || ext == ".f4v"  || ext == ".ivf" ||
+            ext == ".obu");
+}
+
+std::string CoverArtService::resolveSidecarPath(const std::string& mediaPath, bool isDirectory) {
+    if (mediaPath.empty()) return "";
+
+    static const char* const sidecarExts[] = {
+        ".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG", nullptr
+    };
+    static const char* const folderNames[] = {
+        "folder.jpg", "folder.png", "poster.jpg", "poster.png",
+        "cover.jpg", "cover.png", "Folder.jpg", "Poster.jpg", nullptr
+    };
+
+    if (isDirectory) {
+        for (int i = 0; folderNames[i]; ++i) {
+            std::string candidate = mediaPath + "/" + folderNames[i];
+            if (access(candidate.c_str(), R_OK) == 0) {
+                return candidate;
+            }
+        }
+        return "";
+    }
+
+    size_t lastSlash = mediaPath.find_last_of('/');
+    if (lastSlash == std::string::npos || lastSlash == 0) return "";
+
+    std::string dir = mediaPath.substr(0, lastSlash);
+    std::string base = mediaPath.substr(lastSlash + 1);
+    size_t lastDot = base.find_last_of('.');
+    if (lastDot != std::string::npos && lastDot > 0) {
+        base = base.substr(0, lastDot);
+    }
+
+    for (int i = 0; sidecarExts[i]; ++i) {
+        std::string candidate = dir + "/" + base + sidecarExts[i];
+        if (access(candidate.c_str(), R_OK) == 0) {
+            return candidate;
+        }
+    }
+    for (int i = 0; folderNames[i]; ++i) {
+        std::string candidate = dir + "/" + folderNames[i];
+        if (access(candidate.c_str(), R_OK) == 0) {
+            return candidate;
+        }
+    }
+    return "";
+}
+
+CoverArtService::CacheEntry* CoverArtService::findOrAllocateSlot(const std::string& key) {
+    if (key.empty()) return nullptr;
+
+    int freeIdx = -1;
+    for (size_t i = 0; i < m_cache.size(); ++i) {
+        if (m_cache[i].tried && m_cache[i].pathKey == key) {
+            return &m_cache[i];
+        }
+        if (!m_cache[i].tried && freeIdx < 0) {
+            freeIdx = static_cast<int>(i);
+        }
+    }
+
+    if (freeIdx >= 0) {
+        return &m_cache[freeIdx];
+    }
+
+    // Reuse invalid slot or LRU
+    for (size_t i = 0; i < m_cache.size(); ++i) {
+        if (!m_cache[i].valid) {
+            return &m_cache[i];
+        }
+    }
+
+    int oldestIdx = (m_accessClock++) % static_cast<int>(m_cache.size());
+    return &m_cache[oldestIdx];
+}
+
+const CoverArtService::CacheEntry* CoverArtService::findSlot(const std::string& key) const {
+    if (key.empty()) return nullptr;
+    for (const auto& entry : m_cache) {
+        if (entry.tried && entry.pathKey == key) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+const uint32_t* CoverArtService::peekCoverArt(const std::string& mediaPath) const {
+    if (mediaPath.empty()) return nullptr;
+    const auto* slot = findSlot(mediaPath);
+    if (slot && slot->valid) {
+        return slot->pixels.data();
+    }
+    return nullptr;
+}
+
+bool CoverArtService::hasTriedCoverArt(const std::string& mediaPath) const {
+    if (mediaPath.empty()) return false;
+    const auto* slot = findSlot(mediaPath);
+    return slot && slot->tried;
+}
+
+void CoverArtService::boxFilterScaleRgba(const uint8_t* sourceRgba, int srcWidth, int srcHeight,
+                                        uint32_t* destBgra, int destWidth, int destHeight) {
+    if (!sourceRgba || !destBgra || srcWidth < 1 || srcHeight < 1 || destWidth < 1 || destHeight < 1) {
+        return;
+    }
+
+    for (int y = 0; y < destHeight; ++y) {
+        int y0 = static_cast<int>((static_cast<int64_t>(y) * srcHeight) / destHeight);
+        int y1 = static_cast<int>((static_cast<int64_t>(y + 1) * srcHeight) / destHeight);
+        if (y1 <= y0) y1 = y0 + 1;
+        if (y1 > srcHeight) y1 = srcHeight;
+
+        for (int x = 0; x < destWidth; ++x) {
+            int x0 = static_cast<int>((static_cast<int64_t>(x) * srcWidth) / destWidth);
+            int x1 = static_cast<int>((static_cast<int64_t>(x + 1) * srcWidth) / destWidth);
+            if (x1 <= x0) x1 = x0 + 1;
+            if (x1 > srcWidth) x1 = srcWidth;
+
+            unsigned r = 0, g = 0, b = 0, n = 0;
+            for (int yy = y0; yy < y1; ++yy) {
+                const uint8_t* row = sourceRgba + (static_cast<size_t>(yy) * static_cast<size_t>(srcWidth) + static_cast<size_t>(x0)) * 4u;
+                for (int xx = x0; xx < x1; ++xx, row += 4) {
+                    r += row[0];
+                    g += row[1];
+                    b += row[2];
+                    n++;
+                }
+            }
+            if (!n) n = 1;
+            destBgra[y * destWidth + x] = MakeColorBgra(static_cast<uint8_t>(r / n),
+                                                        static_cast<uint8_t>(g / n),
+                                                        static_cast<uint8_t>(b / n),
+                                                        255);
+        }
+    }
+}
+
+/*
+ * One extraction at a time. The worker thread and the synchronous callers
+ * (launch shelf, hero art) share the crash note, the resident hardware slot and
+ * the heap pre-flight, none of which tolerate two extractions overlapping.
+ */
+struct ExtractLock {
+    static pthread_mutex_t& mutex() {
+        static pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+        return m;
+    }
+    ExtractLock()  { pthread_mutex_lock(&mutex()); }
+    ~ExtractLock() { pthread_mutex_unlock(&mutex()); }
+};
+
+bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* outPixels, int targetWidth, int targetHeight) {
+    ExtractLock extractLock;
+    evo_bt("extractVideoFrame: %s (%dx%d)", videoPath.c_str(), targetWidth, targetHeight);
+    evo_boot_log_flush();
+
+    if (videoPath.empty() || !outPixels || targetWidth < 2 || targetHeight < 2) {
+        return false;
+    }
+    if (access(videoPath.c_str(), R_OK) != 0) {
+        evo_bt("extractVideoFrame: access failed: %s", videoPath.c_str());
+        evo_boot_log_flush();
+        return false;
+    }
+
+    /*
+     * #88 / #96: Record heap memory state before and after extraction.
+     */
+    evo_log_alloc_state("thumb-start");
+    struct AllocStateGuard {
+        ~AllocStateGuard() {
+            evo_log_alloc_state("thumb-end");
+        }
+    } allocGuard;
+
+    /*
+     * A file that died in the container probe is refused before it is opened
+     * at all.
+     *
+     * The quarantine check further down deliberately sits *after* the hardware
+     * attempt, because a stream that only killed the software decoder is
+     * exactly what the hardware path is for. This one cannot wait that long:
+     * the fault happened inside libavformat, before EVO had a decoder to
+     * choose, so there is no second path to offer it.
+     */
+    if (evo_crash_note_stage(videoPath.c_str()) == EVO_CRASH_STAGE_PROBE) {
+        evo_bt("extractVideoFrame: quarantined - crashed in the container probe, skipping");
+        evo_boot_log_flush();
+        return false;
+    }
+
+    /*
+     * Floor check, before the demuxer is even opened.
+     *
+     * avformat_find_stream_info() opens decoders of its own to work out the
+     * stream parameters, so it allocates picture buffers exactly like a real
+     * decode does - and it faulted there on a 4K file with flexible memory
+     * exhausted, before any of the gates further down could run. Those gates
+     * size themselves from codecpar, which does not exist yet at this point,
+     * so this one is a flat floor: below it, do not touch the file at all.
+     *
+     * The resident sceVideodec2 decoders reserve ~2 GB of flexible memory at
+     * boot (#41 Phase B + D), which is what makes this reachable at all; see
+     * the note above EVO_VDEC_NATIVE_10BIT in evo_vdec_native.c.
+     */
+    {
+        constexpr size_t ProbeFloorBytes = 64u * 1024u * 1024u;
+        const size_t availBytes = availableFlexBytes();
+        if (availBytes > 0 && availBytes < ProbeFloorBytes) {
+            evo_bt("extractVideoFrame: skipping - only %zuMB flex free, need %zuMB to probe",
+                   availBytes / (1024u * 1024u), ProbeFloorBytes / (1024u * 1024u));
+            evo_boot_log_flush();
+            return false;
+        }
+    }
+
+    AVDictionary* opts = nullptr;
+    av_dict_set(&opts, "probesize", "1048576", 0);
+    av_dict_set(&opts, "analyzeduration", "1000000", 0);
+    /*
+     * Do not estimate the duration by reading the end of the file.
+     *
+     * This is what actually killed the process on "LG 4K HDR Demo - Art.ts",
+     * twice, on two different builds: the register dump both times held
+     * libavformat's own "start time for stream 1 is not set in
+     * estimate_timings_from_pts" - so the fault is in that function, not in a
+     * probe decoder running out of flexible memory as the gates above assume.
+     * Byte-identical register dumps across builds also make it deterministic
+     * rather than a memory-pressure race.
+     *
+     * A container that states its duration in a header (MP4, MKV) never enters
+     * that code. One that does not (MPEG-TS, raw streams) makes libavformat
+     * seek to the end of the file and read packets back, which for a 491 MB
+     * file over USB is also the slowest thing the poster path does.
+     *
+     * A poster does not need it. The duration is used for one thing here -
+     * picking a frame 10% in - and without it seekSec stays 0 and the poster
+     * comes from the first frame, which for a thumbnail is no loss at all.
+     */
+    av_dict_set(&opts, "skip_estimate_duration_from_pts", "1", 0);
+    /* A poster needs the stream's geometry, not a confident frame-rate
+     * estimate. Fewer probe packets means fewer buffers find_stream_info
+     * allocates before it is satisfied. */
+    av_dict_set(&opts, "max_probe_packets", "16", 0);
+
+    /*
+     * Everything from here to the end of find_stream_info runs inside
+     * libavformat, which opens probe decoders of its own and faults rather
+     * than fails when one of them cannot allocate. Nothing in this process can
+     * catch that, so leave a note for the crash handler instead: the next
+     * launch reads it and skips the file, and the folder stays browsable.
+     */
+    CrashNoteScope probeNote(videoPath.c_str(), EVO_CRASH_STAGE_PROBE);
+
+    ThumbTimeout timeout{ thumbNowSec() + 4.0 };
+    AVFormatContext* fmt = avformat_alloc_context();
+    if (fmt) {
+        fmt->interrupt_callback.callback = thumbInterruptCb;
+        fmt->interrupt_callback.opaque   = &timeout;
+    }
+
+    evo_bt("extractVideoFrame: calling avformat_open_input");
+    evo_boot_log_flush();
+    if (avformat_open_input(&fmt, videoPath.c_str(), nullptr, &opts) < 0) {
+        evo_bt("extractVideoFrame: open_input failed: %s", videoPath.c_str());
+        evo_boot_log_flush();
+        av_dict_free(&opts);
+        return false;
+    }
+    av_dict_free(&opts);
+    evo_bt("extractVideoFrame: avformat_open_input ok");
+    evo_boot_log_flush();
+
+    int vstream = -1;
+    for (unsigned int i = 0; i < fmt->nb_streams; ++i) {
+        if (fmt->streams[i]->codecpar && fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            vstream = static_cast<int>(i);
+            break;
+        }
+    }
+    if (vstream >= 0 && fmt->streams[vstream]->codecpar) {
+        const AVCodecParameters* par = fmt->streams[vstream]->codecpar;
+
+        /*
+         * Above 1080p with no hardware decoder to take it:
+         * Since 115d9ff, blocks >= 1 MB come from direct memory first (8+ GB available),
+         * so 4K software decode is safe and enabled by default (see memory-budget.md).
+         * Only skip if the user explicitly switches it off via /mnt/usb0/evo_no_sw_4k.
+         */
+        if (!isSw4kAllowed() && (par->width > 1920 || par->height > 1088)) {
+            const int depth = codecparBitDepth(par);
+            if (availableFlexBytes() > 0 &&
+                !evo_vdec_native_can_open(par->codec_id, par->profile, depth,
+                                          par->width, par->height)) {
+                evo_bt("extractVideoFrame: skipping %dx%d %d-bit codec=%d before "
+                       "find_stream_info - /mnt/usb0/evo_no_sw_4k is set",
+                       par->width, par->height, depth, (int)par->codec_id);
+                evo_boot_log_flush();
+                avformat_close_input(&fmt);
+                return false;
+            }
+        }
+    }
+
+    evo_bt("extractVideoFrame: calling avformat_find_stream_info");
+    evo_boot_log_flush();
+    if (avformat_find_stream_info(fmt, nullptr) < 0) {
+        evo_bt("extractVideoFrame: find_stream_info failed");
+        evo_boot_log_flush();
+        avformat_close_input(&fmt);
+        return false;
+    }
+    evo_bt("extractVideoFrame: avformat_find_stream_info ok, nb_streams=%u", fmt->nb_streams);
+    evo_boot_log_flush();
+
+    /* Survived. Out of libavformat's own decoders now - what follows is a
+     * decoder EVO chose, and it gets its own stage further down. */
+    probeNote.disarm();
+
+    vstream = -1;
+    for (unsigned int i = 0; i < fmt->nb_streams; ++i) {
+        if (fmt->streams[i]->codecpar && fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            vstream = static_cast<int>(i);
+            break;
+        }
+    }
+    if (vstream < 0) {
+        evo_bt("extractVideoFrame: no video stream");
+        evo_boot_log_flush();
+        avformat_close_input(&fmt);
+        return false;
+    }
+
+    AVStream* st = fmt->streams[vstream];
+    if (!st || !st->codecpar) {
+        evo_bt("extractVideoFrame: invalid stream or codecpar");
+        evo_boot_log_flush();
+        avformat_close_input(&fmt);
+        return false;
+    }
+
+
+    double duration = (fmt->duration > 0) ? (static_cast<double>(fmt->duration) / static_cast<double>(AV_TIME_BASE)) : 0.0;
+    double seekSec = 0.0;
+    if (duration > 2.0) {
+        seekSec = duration * 0.10;
+        if (seekSec < 2.0) seekSec = 2.0;
+        if (seekSec > 30.0) seekSec = 30.0;
+        if (seekSec > duration - 1.0) seekSec = duration * 0.5;
+    }
+
+    /*
+     * Hardware first, and before the quarantine check on purpose.
+     *
+     * The quarantine records files that killed the process, and every one of
+     * them killed it inside a *software* decoder. Consulting it first would
+     * deny the hardware path to precisely the files the hardware path exists
+     * to rescue - EVO_TEST_hevc8_4k.mp4 is quarantined and decodes on the
+     * hardware decoder without complaint. So a quarantined file still gets
+     * its hardware attempt, and only the software fallback is gated.
+     */
+    if (decodePosterOnHardware(fmt, st, vstream, seekSec, outPixels,
+                               targetWidth, targetHeight)) {
+        avformat_close_input(&fmt);
+        evo_bt("extractVideoFrame: cleanup complete, success=1 (hardware)");
+        evo_boot_log_flush();
+        return true;
+    }
+
+    /*
+     * Software from here. A stream that has already taken the process down
+     * once gets no second attempt on this path: libavcodec's software
+     * decoders fault rather than return an error when an internal allocation
+     * fails, so there is nothing to catch. Delete <data>/thumb_quarantine to
+     * retry.
+     */
+    if (evo_crash_note_stage(videoPath.c_str()) >= 0) {
+        evo_bt("extractVideoFrame: quarantined after an earlier crash, skipping");
+        evo_boot_log_flush();
+        avformat_close_input(&fmt);
+        return false;
+    }
+
+    /*
+     * Above 1080p software decode: allowed by default since 115d9ff (direct memory
+     * heap backing). Touch /mnt/usb0/evo_no_sw_4k to revert to refusing.
+     */
+    if (!isSw4kAllowed() &&
+        (st->codecpar->width > 1920 || st->codecpar->height > 1088)) {
+        evo_bt("extractVideoFrame: no software poster for %dx%d - /mnt/usb0/evo_no_sw_4k is set",
+               st->codecpar->width, st->codecpar->height);
+        evo_boot_log_flush();
+        avformat_close_input(&fmt);
+        return false;
+    }
+
+    const AVCodec* dec = avcodec_find_decoder(st->codecpar->codec_id);
+    if (!dec) {
+        evo_bt("extractVideoFrame: decoder not found for id=%d", st->codecpar->codec_id);
+        evo_boot_log_flush();
+        avformat_close_input(&fmt);
+        return false;
+    }
+    evo_bt("extractVideoFrame: found decoder %s (id=%d)", dec->name ? dec->name : "?", st->codecpar->codec_id);
+    evo_boot_log_flush();
+
+    AVCodecContext* ctx = avcodec_alloc_context3(dec);
+    if (!ctx || avcodec_parameters_to_context(ctx, st->codecpar) < 0) {
+        evo_bt("extractVideoFrame: alloc_context/parameters failed");
+        evo_boot_log_flush();
+        if (ctx) avcodec_free_context(&ctx);
+        avformat_close_input(&fmt);
+        return false;
+    }
+
+    ctx->thread_count = (st->codecpar->width >= 2560 || st->codecpar->codec_id == AV_CODEC_ID_AV1) ? 4 : 2;
+    if (st->codecpar->codec_id == AV_CODEC_ID_AV1) {
+        /*
+         * In libdav1d, FF_THREAD_SLICE keeps max_frame_delay = 1 so the keyframe
+         * is decoded across the worker thread pool and returned immediately on
+         * packet receive without multi-frame buffering delay.
+         */
+        ctx->thread_type = FF_THREAD_SLICE;
+    } else {
+        ctx->thread_type = FF_THREAD_FRAME;
+    }
+#ifdef AV_CODEC_FLAG2_FAST
+    ctx->flags2 |= AV_CODEC_FLAG2_FAST;
+#endif
+    /* A 320x180 poster does not care about deblocking, and skipping it means
+     * fewer buffers touched as well as less work. */
+    ctx->skip_loop_filter = AVDISCARD_ALL;
+    ctx->get_buffer2 = thumbGetBuffer;
+
+    /*
+     * Working-set pre-flight.
+     *
+     * Since commit 115d9ff, blocks of 1 MB and up (including all decoded picture buffers
+     * for 1080p and 4K) are served from direct memory (>= 8 GB available).
+     * Flexible memory only serves small contexts (< 1 MB), so we only gate
+     * if flexible memory is critically low (< 32 MB).
+     */
+    {
+        const size_t availBytes = availableFlexBytes();
+        if (availBytes > 0 && availBytes < 32u * 1024u * 1024u) {
+            evo_bt("extractVideoFrame: skipping %dx%d - flex %zuMB critically low",
+                   st->codecpar->width, st->codecpar->height,
+                   availBytes / (1024u * 1024u));
+            evo_boot_log_flush();
+            avcodec_free_context(&ctx);
+            avformat_close_input(&fmt);
+            return false;
+        }
+    }
+
+    evo_bt("extractVideoFrame: calling avcodec_open2");
+    evo_boot_log_flush();
+    if (avcodec_open2(ctx, dec, nullptr) < 0) {
+        evo_bt("extractVideoFrame: avcodec_open2 failed");
+        evo_boot_log_flush();
+        avcodec_free_context(&ctx);
+        avformat_close_input(&fmt);
+        return false;
+    }
+    evo_bt("extractVideoFrame: avcodec_open2 ok");
+    evo_boot_log_flush();
+
+    if (seekSec > 0.0 && st->time_base.den > 0) {
+        int64_t seekTs = static_cast<int64_t>(seekSec / av_q2d(st->time_base));
+        if (seekTs < 0) seekTs = 0;
+        evo_bt("extractVideoFrame: seeking to ts=%lld", static_cast<long long>(seekTs));
+        evo_boot_log_flush();
+        if (av_seek_frame(fmt, vstream, seekTs, AVSEEK_FLAG_BACKWARD) < 0) {
+            av_seek_frame(fmt, vstream, 0, AVSEEK_FLAG_BACKWARD);
+        }
+        avcodec_flush_buffers(ctx);
+        evo_bt("extractVideoFrame: seek done");
+        evo_boot_log_flush();
+    }
+
+    AVFrame* frame = av_frame_alloc();
+    AVPacket* pkt = av_packet_alloc();
+    if (!frame || !pkt) {
+        evo_bt("extractVideoFrame: frame/pkt alloc failed");
+        evo_boot_log_flush();
+        if (frame) av_frame_free(&frame);
+        if (pkt) av_packet_free(&pkt);
+        avcodec_free_context(&ctx);
+        avformat_close_input(&fmt);
+        return false;
+    }
+    bool gotFrame = false;
+    int packetCount = 0;
+
+    evo_bt("extractVideoFrame: starting read loop");
+    evo_boot_log_flush();
+
+    /* From here until the decoder is released we are inside code that can
+     * fault instead of failing. Leave a note for the crash handler. */
+    evo_crash_note_set(videoPath.c_str(), EVO_CRASH_STAGE_DECODE);
+
+    while (packetCount < 48 && av_read_frame(fmt, pkt) >= 0) {
+        if (thumbNowSec() >= timeout.deadlineSec) {
+            evo_bt("extractVideoFrame: decode timed out after %d packets", packetCount);
+            evo_boot_log_flush();
+            av_packet_unref(pkt);
+            break;
+        }
+        packetCount++;
+        if (pkt->stream_index == vstream) {
+            if (avcodec_send_packet(ctx, pkt) == 0) {
+                if (avcodec_receive_frame(ctx, frame) == 0) {
+                    gotFrame = true;
+                    evo_bt("extractVideoFrame: got frame on packet %d (%dx%d fmt=%d)", packetCount, frame->width, frame->height, frame->format);
+                    evo_boot_log_flush();
+                    av_packet_unref(pkt);
+                    break;
+                }
+            }
+        }
+        av_packet_unref(pkt);
+    }
+
+    if (!gotFrame && thumbNowSec() < timeout.deadlineSec) {
+        evo_bt("extractVideoFrame: flushing decoder");
+        evo_boot_log_flush();
+        avcodec_send_packet(ctx, nullptr);
+        if (avcodec_receive_frame(ctx, frame) == 0) {
+            gotFrame = true;
+            evo_bt("extractVideoFrame: got frame after flush (%dx%d fmt=%d)", frame->width, frame->height, frame->format);
+            evo_boot_log_flush();
+        }
+    }
+
+    /*
+     * Release the decoder and the demuxer before scaling.
+     *
+     * The frame's planes are reference-counted, so they outlive the context
+     * that produced them; everything else the decoder was holding - the rest
+     * of the DPB, the parser, the demuxer's buffers - is handed back here
+     * instead of staying live across sws_getContext(). At 4K that is the
+     * difference between the scaler asking for its tables with tens of MB
+     * free and asking for them with none, which is where this used to fail.
+     */
+    av_packet_free(&pkt);
+    avcodec_free_context(&ctx);
+    avformat_close_input(&fmt);
+
+    /* Out of the decoder; swscale has never been the thing that faults. */
+    evo_crash_note_set(nullptr, EVO_CRASH_STAGE_DECODE);
+
+    bool success = false;
+    if (gotFrame && frame->width > 0 && frame->height > 0 && frame->format >= 0 && frame->data[0]) {
+        evo_bt("extractVideoFrame: scaling via sws_getContext (%dx%d -> %dx%d fmt=%d)",
+               frame->width, frame->height, targetWidth, targetHeight, frame->format);
+        evo_boot_log_flush();
+
+        enum AVPixelFormat srcFormat = static_cast<enum AVPixelFormat>(frame->format);
+        if (srcFormat == AV_PIX_FMT_YUVJ420P) srcFormat = AV_PIX_FMT_YUV420P;
+        else if (srcFormat == AV_PIX_FMT_YUVJ422P) srcFormat = AV_PIX_FMT_YUV422P;
+        else if (srcFormat == AV_PIX_FMT_YUVJ444P) srcFormat = AV_PIX_FMT_YUV444P;
+
+        SwsContext* sws = sws_getContext(
+            frame->width, frame->height, srcFormat,
+            targetWidth, targetHeight, AV_PIX_FMT_RGBA,
+            SWS_BILINEAR, nullptr, nullptr, nullptr
+        );
+
+        if (sws) {
+            uint8_t* dst[4] = { reinterpret_cast<uint8_t*>(outPixels), nullptr, nullptr, nullptr };
+            int dstLinesize[4] = { targetWidth * 4, 0, 0, 0 };
+            sws_scale(sws, (const uint8_t* const*)frame->data, frame->linesize, 0, frame->height, dst, dstLinesize);
+            sws_freeContext(sws);
+            success = true;
+            evo_bt("extractVideoFrame: sws_scale done");
+            evo_boot_log_flush();
+        } else {
+            evo_bt("extractVideoFrame: sws_getContext failed");
+            evo_boot_log_flush();
+        }
+    } else {
+        evo_bt("extractVideoFrame: no valid frame decoded");
+        evo_boot_log_flush();
+    }
+
+    av_frame_free(&frame);
+    evo_bt("extractVideoFrame: cleanup complete, success=%d", success ? 1 : 0);
+    evo_boot_log_flush();
+    return success;
+}
+
+/*
+ * Cache first, then touch the filesystem.
+ *
+ * The existence check used to run before the cache was consulted, and returned
+ * without recording anything anywhere. A path that does not resolve - a recents
+ * entry whose file has since been deleted, which is the ordinary way to end up
+ * here - therefore missed the cache on every single call and was retried for
+ * the life of the process. From the hardware log of 2026-09-18: 848 identical
+ * "access fail len=141" triples in 14.5 s, one per frame, for one dead entry on
+ * the launch shelf, and 87% of the entire log.
+ *
+ * The tracing was the more expensive half, and it was not confined to the
+ * failing path. Every call - including the cache hits, which is nearly all of
+ * them once the shelf is warm - wrote three evo_bt lines and flushed three
+ * times, and a flush here lands on /mnt/usb0, i.e. USB storage, as well as
+ * klog. Those traces are there to explain the first attempt at a path, so that
+ * is now the only time they run.
+ *
+ * Consulting the cache first also lets a failed lookup be recorded as
+ * tried+invalid like any other miss, so it short-circuits from then on. One
+ * deliberate consequence: a cover whose file disappears mid-session keeps
+ * showing its cached poster rather than blanking, because the filesystem is no
+ * longer re-checked on a hit. That is consistent with how this cache already
+ * treats every other kind of staleness - nothing invalidates a slot once tried.
+ */
+const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool isDirectory) {
+    if (mediaPath.empty())
+        return nullptr;
+
+    CacheEntry* slot = findOrAllocateSlot(mediaPath);
+    if (!slot)
+        return nullptr;
+
+    if (slot->tried && slot->pathKey == mediaPath) {
+        return slot->valid ? slot->pixels.data() : nullptr;
+    }
+
+    /* First attempt for this path: from here down the tracing is once per path,
+     * not once per frame. */
+    evo_bt("getCoverArt: %s (isDir=%d)", mediaPath.c_str(), isDirectory ? 1 : 0);
+    evo_boot_log_flush();
+
+    slot->pathKey = mediaPath;
+    slot->tried = true;
+    slot->valid = false;
+
+    if (access(mediaPath.c_str(), R_OK) != 0) {
+        evo_bt("getCoverArt: access fail len=%zu -> cached as missing", mediaPath.length());
+        evo_boot_log_flush();
+        return nullptr;
+    }
+
+    std::string sidecar = resolveSidecarPath(mediaPath, isDirectory);
+    evo_bt("getCoverArt: sidecar='%s'", sidecar.c_str());
+    evo_boot_log_flush();
+    if (!sidecar.empty() && access(sidecar.c_str(), R_OK) == 0) {
+        int w = 0, h = 0, ch = 0;
+        unsigned char* data = stbi_load(sidecar.c_str(), &w, &h, &ch, 4);
+        if (data && w >= 2 && h >= 2) {
+            boxFilterScaleRgba(data, w, h, slot->pixels.data(), PosterWidth, PosterHeight);
+            stbi_image_free(data);
+            slot->valid = true;
+            return slot->pixels.data();
+        }
+        if (data) stbi_image_free(data);
+    }
+
+    if (!isDirectory && isVideoFile(mediaPath)) {
+        evo_bt("getCoverArt: isVideo, calling extractVideoFrame");
+        evo_boot_log_flush();
+        if (extractVideoFrame(mediaPath, slot->pixels.data(), PosterWidth, PosterHeight)) {
+            slot->valid = true;
+            return slot->pixels.data();
+        }
+    }
+
+    if (!isDirectory) {
+        size_t dot = mediaPath.find_last_of('.');
+        if (dot != std::string::npos) {
+            std::string ext = mediaPath.substr(dot);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".webp") {
+                int w = 0, h = 0, ch = 0;
+                unsigned char* data = stbi_load(mediaPath.c_str(), &w, &h, &ch, 4);
+                if (data && w >= 2 && h >= 2) {
+                    boxFilterScaleRgba(data, w, h, slot->pixels.data(), PosterWidth, PosterHeight);
+                    stbi_image_free(data);
+                    slot->valid = true;
+                    return slot->pixels.data();
+                }
+                if (data) stbi_image_free(data);
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+void CoverArtService::ensureHeroArt(const std::string& mediaPath) {
+    if (mediaPath.empty()) {
+        m_heroArtPath.clear();
+        m_heroArtValid = false;
+        return;
+    }
+
+    if (m_heroArtPath == mediaPath) {
+        return;
+    }
+
+    m_heroArtPath = mediaPath;
+    m_heroArtValid = false;
+
+    if (access(mediaPath.c_str(), R_OK) != 0) {
+        return;
+    }
+
+    if (isVideoFile(mediaPath)) {
+        if (extractVideoFrame(mediaPath, m_heroArtPixels.data(), HeroWidth, HeroHeight)) {
+            m_heroArtValid = true;
+            return;
+        }
+    }
+
+    std::string sidecar = resolveSidecarPath(mediaPath, false);
+    if (!sidecar.empty() && access(sidecar.c_str(), R_OK) == 0) {
+        int w = 0, h = 0, ch = 0;
+        unsigned char* data = stbi_load(sidecar.c_str(), &w, &h, &ch, 4);
+        if (data && w >= 2 && h >= 2) {
+            boxFilterScaleRgba(data, w, h, m_heroArtPixels.data(), HeroWidth, HeroHeight);
+            stbi_image_free(data);
+            m_heroArtValid = true;
+            return;
+        }
+        if (data) stbi_image_free(data);
+    }
+}
+
+void CoverArtService::ensureBrowserPreview(const std::string& mediaPath, bool isDirectory) {
+    if (mediaPath.empty()) {
+        m_browserPreviewValid = false;
+        m_browserPreviewPath.clear();
+        return;
+    }
+
+    if (m_browserPreviewPath == mediaPath) {
+        if (m_browserPreviewValid || m_browserPreviewFailed) {
+            return;
+        }
+    }
+
+    m_browserPreviewPath = mediaPath;
+    m_browserPreviewValid = false;
+    m_browserPreviewFailed = false;
+
+    std::string sidecar = resolveSidecarPath(mediaPath, isDirectory);
+    if (!sidecar.empty()) {
+        int w = 0, h = 0, ch = 0;
+        unsigned char* data = stbi_load(sidecar.c_str(), &w, &h, &ch, 4);
+        if (data && w >= 2 && h >= 2) {
+            boxFilterScaleRgba(data, w, h, m_browserPreviewPixels.data(), PreviewWidth, PreviewHeight);
+            stbi_image_free(data);
+            m_browserPreviewValid = true;
+            return;
+        }
+        if (data) stbi_image_free(data);
+    }
+
+    if (!isDirectory && isVideoFile(mediaPath)) {
+        if (extractVideoFrame(mediaPath, m_browserPreviewPixels.data(), PreviewWidth, PreviewHeight)) {
+            m_browserPreviewValid = true;
+            return;
+        }
+    }
+
+    if (!isDirectory) {
+        size_t dot = mediaPath.find_last_of('.');
+        if (dot != std::string::npos) {
+            std::string ext = mediaPath.substr(dot);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".webp") {
+                int w = 0, h = 0, ch = 0;
+                unsigned char* data = stbi_load(mediaPath.c_str(), &w, &h, &ch, 4);
+                if (data && w >= 2 && h >= 2) {
+                    boxFilterScaleRgba(data, w, h, m_browserPreviewPixels.data(), PreviewWidth, PreviewHeight);
+                    stbi_image_free(data);
+                    m_browserPreviewValid = true;
+                    return;
+                }
+                if (data) stbi_image_free(data);
+            }
+        }
+    }
+
+    m_browserPreviewFailed = true;
+}
+
+const uint32_t* CoverArtService::getBrowserPreviewPixels() const {
+    return m_browserPreviewValid ? m_browserPreviewPixels.data() : nullptr;
+}
+
+/* ---- Off-thread loading ------------------------------------------------ */
+
+/* Same order as getCoverArt: sidecar image, then a video frame, then the file
+ * itself if it is an image. Touches no member state, so the worker can run it. */
+bool CoverArtService::loadArtInto(const std::string& mediaPath, bool isDirectory,
+                                  uint32_t* out, int w, int h) {
+    if (access(mediaPath.c_str(), R_OK) != 0)
+        return false;
+
+    std::string sidecar = resolveSidecarPath(mediaPath, isDirectory);
+    if (!sidecar.empty()) {
+        int sw = 0, sh = 0, ch = 0;
+        unsigned char* data = stbi_load(sidecar.c_str(), &sw, &sh, &ch, 4);
+        if (data && sw >= 2 && sh >= 2) {
+            boxFilterScaleRgba(data, sw, sh, out, w, h);
+            stbi_image_free(data);
+            return true;
+        }
+        if (data) stbi_image_free(data);
+    }
+
+    if (!isDirectory && isVideoFile(mediaPath)) {
+        if (extractVideoFrame(mediaPath, out, w, h))
+            return true;
+    }
+
+    if (!isDirectory) {
+        size_t dot = mediaPath.find_last_of('.');
+        if (dot != std::string::npos) {
+            std::string ext = mediaPath.substr(dot);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".webp") {
+                int sw = 0, sh = 0, ch = 0;
+                unsigned char* data = stbi_load(mediaPath.c_str(), &sw, &sh, &ch, 4);
+                if (data && sw >= 2 && sh >= 2) {
+                    boxFilterScaleRgba(data, sw, sh, out, w, h);
+                    stbi_image_free(data);
+                    return true;
+                }
+                if (data) stbi_image_free(data);
+            }
+        }
+    }
+    return false;
+}
+
+CoverArtService::~CoverArtService() {
+    if (m_workerStarted) {
+        pthread_mutex_lock(&m_jobMutex);
+        m_stop = true;
+        pthread_cond_signal(&m_jobCond);
+        pthread_mutex_unlock(&m_jobMutex);
+        pthread_join(m_worker, nullptr);
+    }
+}
+
+void* CoverArtService::workerEntry(void* self) {
+    static_cast<CoverArtService*>(self)->workerMain();
+    return nullptr;
+}
+
+void CoverArtService::startWorker() {
+    if (m_workerStarted) return;
+    /* FFmpeg and the decoder libraries overflow the default stack. */
+    pthread_attr_t attr;
+    int rc;
+    if (pthread_attr_init(&attr) == 0) {
+        pthread_attr_setstacksize(&attr, 1u << 20);
+        rc = pthread_create(&m_worker, &attr, workerEntry, this);
+        pthread_attr_destroy(&attr);
+    } else {
+        rc = pthread_create(&m_worker, nullptr, workerEntry, this);
+    }
+    m_workerStarted = (rc == 0);
+    if (!m_workerStarted)
+        evo_bt("CoverArtService: worker pthread_create rc=%d", rc);
+}
+
+void CoverArtService::workerMain() {
+    for (;;) {
+        Job job;
+        pthread_mutex_lock(&m_jobMutex);
+        for (;;) {
+            if (m_stop) { pthread_mutex_unlock(&m_jobMutex); return; }
+            /* The focused file's preview beats any poster. */
+            if (m_hasPreviewJob) {
+                job = m_previewJob;
+                m_hasPreviewJob = false;
+                break;
+            }
+            if (!m_posterJobs.empty()) {
+                job = m_posterJobs.front();
+                m_posterJobs.pop_front();
+                break;
+            }
+            pthread_cond_wait(&m_jobCond, &m_jobMutex);
+        }
+        m_busy = true;
+        pthread_mutex_unlock(&m_jobMutex);
+
+        Result res;
+        res.job = job;
+        const int w = job.preview ? PreviewWidth : PosterWidth;
+        const int h = job.preview ? PreviewHeight : PosterHeight;
+        res.pixels.assign(static_cast<size_t>(w) * h, 0);
+        res.ok = loadArtInto(job.path, job.isDir, res.pixels.data(), w, h);
+
+        pthread_mutex_lock(&m_jobMutex);
+        m_results.push_back(std::move(res));
+        m_busy = false;
+        pthread_cond_broadcast(&m_idleCond);
+        pthread_mutex_unlock(&m_jobMutex);
+
+        /* Back-to-back 4K decodes exhausted the heap before this was paced
+         * (see the pre-flight in extractVideoFrame); leave the allocator a gap. */
+        if (!job.preview)
+            usleep(150 * 1000);
+    }
+}
+
+void CoverArtService::requestCoverArt(const std::string& mediaPath, bool isDirectory) {
+    if (mediaPath.empty()) return;
+    if (findSlot(mediaPath)) return;                 /* tried already */
+    if (m_pendingPosters.count(mediaPath)) return;
+    startWorker();
+    if (!m_workerStarted) return;
+
+    constexpr size_t MaxQueued = 16;
+    pthread_mutex_lock(&m_jobMutex);
+    /* Fast scrolling leaves tiles behind that nobody is looking at; the oldest
+     * request is the likeliest to be one of them. */
+    while (m_posterJobs.size() >= MaxQueued) {
+        m_pendingPosters.erase(m_posterJobs.front().path);
+        m_posterJobs.pop_front();
+    }
+    Job j;
+    j.path = mediaPath;
+    j.isDir = isDirectory;
+    j.generation = m_generation;
+    m_posterJobs.push_back(std::move(j));
+    pthread_cond_signal(&m_jobCond);
+    pthread_mutex_unlock(&m_jobMutex);
+    m_pendingPosters.insert(mediaPath);
+}
+
+void CoverArtService::requestBrowserPreview(const std::string& mediaPath, bool isDirectory) {
+    if (mediaPath.empty()) {
+        m_browserPreviewValid = false;
+        m_browserPreviewPath.clear();
+        m_previewPending = false;
+        return;
+    }
+    if (m_browserPreviewPath == mediaPath) return;   /* pending, valid or failed */
+
+    startWorker();
+    if (!m_workerStarted) return;
+
+    m_browserPreviewPath = mediaPath;
+    m_browserPreviewValid = false;
+    m_browserPreviewFailed = false;
+    m_previewPending = true;
+
+    pthread_mutex_lock(&m_jobMutex);
+    m_previewJob = Job();
+    m_previewJob.preview = true;
+    m_previewJob.path = mediaPath;
+    m_previewJob.isDir = isDirectory;
+    m_previewJob.generation = m_generation;
+    m_hasPreviewJob = true;                          /* replaces any older one */
+    pthread_cond_signal(&m_jobCond);
+    pthread_mutex_unlock(&m_jobMutex);
+}
+
+void CoverArtService::pumpAsync() {
+    if (!m_workerStarted) return;
+    for (;;) {
+        Result res;
+        pthread_mutex_lock(&m_jobMutex);
+        if (m_results.empty()) { pthread_mutex_unlock(&m_jobMutex); return; }
+        res = std::move(m_results.front());
+        m_results.pop_front();
+        const unsigned gen = m_generation;
+        pthread_mutex_unlock(&m_jobMutex);
+
+        if (res.job.generation != gen) continue;     /* cache was cleared */
+
+        if (res.job.preview) {
+            if (res.job.path != m_browserPreviewPath) continue;   /* cursor moved on */
+            m_previewPending = false;
+            if (res.ok) {
+                std::copy(res.pixels.begin(), res.pixels.end(), m_browserPreviewPixels.begin());
+                m_browserPreviewValid = true;
+            } else {
+                m_browserPreviewFailed = true;
+            }
+        } else {
+            m_pendingPosters.erase(res.job.path);
+            CacheEntry* slot = findOrAllocateSlot(res.job.path);
+            if (!slot) continue;
+            slot->pathKey = res.job.path;
+            slot->tried = true;
+            slot->valid = res.ok;
+            if (res.ok)
+                std::copy(res.pixels.begin(), res.pixels.end(), slot->pixels.begin());
+        }
+    }
+}
+
+void CoverArtService::quiesce() {
+    if (!m_workerStarted) return;
+    pthread_mutex_lock(&m_jobMutex);
+    m_posterJobs.clear();
+    m_hasPreviewJob = false;
+    while (m_busy)
+        pthread_cond_wait(&m_idleCond, &m_jobMutex);
+    pthread_mutex_unlock(&m_jobMutex);
+    m_pendingPosters.clear();
+    m_previewPending = false;
+    pumpAsync();
+    /* A preview that was queued and dropped must be re-requestable. */
+    if (!m_browserPreviewValid && !m_browserPreviewFailed)
+        m_browserPreviewPath.clear();
+}
+
+} // namespace evo

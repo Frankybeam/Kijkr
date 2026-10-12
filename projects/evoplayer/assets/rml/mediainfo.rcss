@@ -1,0 +1,261 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Media Info Specifications RCSS Stylesheet
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16dp;
+    color: #ffffff;
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+    width: 1920dp;
+    height: 1080dp;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+/* Fullscreen Dimmed Scrim */
+#mediainfo-scrim {
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #000000ba;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Media Info Main Card */
+#mediainfo-card {
+    width: 1400dp;
+    background-color: #0b101afc;
+    border-width: 1dp;
+    border-color: #1e293b;
+    border-radius: 24dp;
+    padding: 38dp 48dp;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header */
+#mediainfo-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    width: 1304dp;
+}
+
+#header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#mediainfo-indicator {
+    width: 4dp;
+    height: 52dp;
+    background-color: #0070d1;
+    border-radius: 2dp;
+    margin-right: 18dp;
+}
+
+#header-text-block {
+    display: flex;
+    flex-direction: column;
+    max-width: 980dp;
+}
+
+#mediainfo-eyebrow {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #ffd700;
+    letter-spacing: 1.5dp;
+}
+
+#mediainfo-title {
+    font-size: 26dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5dp;
+    margin-top: 3dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#mediainfo-path {
+    font-size: 13dp;
+    font-weight: normal;
+    color: #8b99ad;
+    margin-top: 2dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#header-badges {
+    display: flex;
+    flex-direction: row;
+    gap: 10dp;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.info-badge {
+    background-color: #152033;
+    border-width: 1dp;
+    border-color: #293d5c;
+    border-radius: 10dp;
+    padding: 6dp 14dp;
+    font-size: 12dp;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 0.5dp;
+}
+
+.badge-hdr {
+    border-color: #ffd700;
+    color: #ffd700;
+}
+
+.badge-hidden {
+    display: none;
+}
+
+/* Specs Grid */
+#specs-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    margin-top: 30dp;
+    gap: 20dp;
+    width: 1304dp;
+}
+
+.spec-card {
+    width: 640dp;
+    background-color: #0f1726d8;
+    border-width: 1dp;
+    border-color: #1c283d;
+    border-radius: 16dp;
+    padding: 20dp 24dp;
+    display: flex;
+    flex-direction: column;
+}
+
+.card-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 16dp;
+    border-bottom-width: 1dp;
+    border-bottom-color: #1b2638;
+    padding-bottom: 10dp;
+}
+
+.card-icon {
+    width: 20dp;
+    height: 20dp;
+    display: inline-block;
+    margin-right: 10dp;
+}
+
+.card-title {
+    font-size: 14dp;
+    font-weight: bold;
+    color: #e2e8f0;
+    letter-spacing: 1dp;
+}
+
+.spec-row {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10dp;
+}
+
+.spec-key {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 0.5dp;
+    flex-shrink: 0;
+    margin-right: 16dp;
+}
+
+/* Bounded (card is 592 px inside its padding) so long codec strings such as
+ * "HEVC (H.265 Main 10)" / "Dolby Digital (E-AC-3)" truncate rather than
+ * colliding with the key label (#16). */
+.spec-val {
+    width: 380dp;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #f1f5f9;
+    letter-spacing: 0.5dp;
+    text-align: right;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+/* Footer Hints */
+#mediainfo-footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 28dp;
+    margin-top: 30dp;
+    width: 1304dp;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.footer-glyph {
+    width: 20dp;
+    height: 20dp;
+    display: inline-block;
+}
+
+.glyph-badge {
+    width: 28dp;
+    height: 28dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 14dp;
+    background-color: rgba(20, 40, 80, 0.9);
+}
+
+.glyph-badge-img {
+    width: 18dp;
+    height: 18dp;
+}
+
+.footer-text {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1dp;
+}
+
+#footer-engine-ver {
+    margin-left: auto;
+    font-size: 13dp;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1dp;
+}

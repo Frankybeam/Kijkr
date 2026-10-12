@@ -1,0 +1,149 @@
+# Proprietary files
+
+**Nothing in `proprietary/` is ever committed.** It is excluded by
+`.gitignore`, and so are `*.sprx`, `*.self`, `*.pkg`, `*.pup`, `*.sfo`, `*.key`
+and `*.pem` wherever they appear in the tree.
+
+Do not commit, and do not paste into issues:
+
+- Sony `.sprx` / `.self` system modules, decrypted or otherwise
+- Any part of the official Prospero SDK, including `prospero-pub-cmd`
+- Console dumps, kernel dumps, `pfsSKKey` material
+- Private keys, certificates, credentials, PSN account data
+
+This repository builds entirely from open sources. Everything in
+[the validation checklist](../README.md#25-final-validation-checklist) passes
+without a single proprietary file. Proprietary material is only ever needed for
+*optional* research paths, and each of those fails loudly rather than silently
+substituting something wrong.
+
+## Layout
+
+```
+proprietary/
+├── README.md          committed - explains the layout
+├── sprx/              your decrypted Sony modules      (ignored)
+├── tools/             licensed Sony tooling            (ignored)
+└── keys/              never share these                (ignored)
+```
+
+## Supplying SPRX modules for SCE stub generation
+
+This is the supported route to calling a Sony module the SDK has no stub for —
+`libSceVdecCore`, `libSceAvPlayer` and friends (see
+[native-media-research.md](research/native-media-research.md)).
+
+The SDK implements it natively. `sce_stubs/Makefile`:
+
+```make
+SPRXS := $(wildcard *.sprx)
+STUBS := $(SPRXS:.sprx=.c)
+
+NID_DB     := aerolib.csv
+NID_DB_URL := https://raw.githubusercontent.com/zecoxao/sce_symbols/main/$(NID_DB)
+
+stubs: $(NID_DB) $(STUBS)
+
+%.c: %.sprx
+	$(PYTHON) genstub.py $^ > $@
+```
+
+`genstub.py` walks the module's `PT_DYNAMIC` segment with pyelftools, maps each
+exported NID back to a symbol name through `aerolib.csv`, and emits a `.c` of
+bare `asm(".global ...")` declarations. That is then linked into a `.so` the
+linker can resolve against.
+
+### Procedure
+
+1. Obtain the decrypted module legitimately, from **your own console**, and
+   place it in `proprietary/sprx/`:
+
+   ```
+   proprietary/sprx/libSceVdecCore.sprx
+   ```
+
+2. Build the SDK from source, since stub generation happens in its tree:
+
+   ```bash
+   ./scripts/shell.sh
+   ./scripts/setup-sdk.sh --from-source
+   ```
+
+3. Copy your module into the SDK's stub directory and generate:
+
+   ```bash
+   git clone https://github.com/ps5-payload-dev/sdk /tmp/sdk
+   cp /workspace/proprietary/sprx/*.sprx /tmp/sdk/sce_stubs/
+   make -C /tmp/sdk/sce_stubs stubs      # fetches aerolib.csv, runs genstub.py
+   make -C /tmp/sdk/sce_stubs            # builds the .so stubs
+   sudo make -C /tmp/sdk/sce_stubs install DESTDIR=$PS5_PAYLOAD_SDK
+   ```
+
+4. Link normally: `-lSceVdecCore`.
+
+The generated `.c` contains only symbol names, no Sony code — but the `.sprx`
+it came from must stay out of the repository regardless.
+
+> Symbols whose NID is not in `aerolib.csv` come out as raw NID strings. That
+> is a naming gap, not a failure; `prospero-nid` in the SDK's `bin/` helps
+> correlate them.
+
+## Licensed Sony tooling (fPKG signing)
+
+True signed `.pkg` creation needs `prospero-pub-cmd` from the official Prospero
+SDK. If you hold a legitimate licensed copy:
+
+```
+proprietary/tools/prospero-pub-cmd
+```
+
+`scripts/package-pkg.sh` checks for it and **refuses with a clear message** when
+it is absent, rather than emitting something that is not a PKG. See
+[packaging.md](build/packaging.md) — and note that homebrew distribution does not
+need this at all.
+
+## Fail loudly, never substitute
+
+Per the brief: an absent optional proprietary dependency must produce a clear
+error, not a silent fallback. Current behaviour:
+
+| Missing | Behaviour |
+|---|---|
+| `proprietary/tools/prospero-pub-cmd` | `package-pkg.sh --format pkg` exits with an explanation and points at `--format homebrew` |
+| SPRX for stub generation | not consulted at all unless you run the stub flow above; `decoder_test` instead reports which modules are reachable at run time |
+| `proprietary/` missing entirely | everything in the checklist still passes |
+
+## Third-party open-source code in the build
+
+Not proprietary, but recorded here so the licences are in one place.
+
+| Component | Where | Licence | Notes |
+|---|---|---|---|
+| AMD FidelityFX Super Resolution 1.0 (EASU + RCAS) | ported to GLSL in `tools/gen_upscale_pipes.py` → `projects/evoplayer/shaders/agc/upscale_{easu,rcas}.pipe` | MIT, © Advanced Micro Devices | #103 Sharp upscaler. A port of `ffx_fsr1.h`'s float path, not a copy of the header |
+| ps5-homebrew-dev-protocol launch/close controllers | `tools/ps5-controllers/` (vendored unchanged, with `COPYING`) | GPL-3.0-or-later, © BlackBearReloaded; adapted from shsrv/websrv © John Törnblom | Dev tooling only: standalone ELF payloads sent to elfldr by `evo-remote.sh`. Never linked into EVO or shipped in the `.ffpfsc` |
+| Anime4K `Upscale_CNN_x2` S and M | `third_party/anime4k/` (vendored unchanged, with its `LICENSE`) → `upscale_a4k_*.pipe` | MIT, © bloc97 | #103 AI upscaler. The network weights are the literal constants in those mpv hooks |
+| ps5-homebrew-ui | `third_party/ps5-homebrew-ui/` (cloned unchanged, own `LICENSE`); compiled into the app via `ui_kit/`; shader ported to `ui_sdf.pipe` | GPL-3.0-or-later, © BlackBearReloaded | EVO's own screens ([ui/hui-kit.md](ui/hui-kit.md)). Bundled from it: the Inter, Montserrat and DejaVu Sans Mono baked fonts (`assets/hui/fonts`, each with its licence file) and the "glass" sound effects (`assets/hui/sfx`, the author's own, project licence). Third-party notices: `third_party/ps5-homebrew-ui/THIRD_PARTY_NOTICES.md` |
+
+Live-action network (#123), tried 2026-10-08 and not shipped. FSRCNNX x2 8-0-4-1
+(igv/FSRCNN-TensorFlow 1.1) has LGPL-3.0-or-later weights, which fit EVO's
+GPL-3.0; the training data is undocumented. It translated to 13 conv passes and
+ran on the PS5 Pro at about 3.2 ms per 1080p to 4K frame, but rendered
+tile-sized black holes. Suspected cause: EVO's between-pass barrier
+(RELEASE_MEM, no wait) lets the next pass read before the last one finishes. A
+fix needs a new GPU sync call (AcquireMem), which is a panic risk. Also
+checked: ArtCNN (MIT, anime-aimed), CuNNy (LGPL-3.0, visual novels), RAVU
+(LGPL-3.0 at repo level, per-file headers unchecked).
+
+## If you commit something by accident
+
+A `git rm` is not enough — the blob stays in history.
+
+```bash
+# Stop immediately; do not push.
+git rm --cached path/to/file
+# Then purge it from history (rewrites commits):
+git filter-repo --path path/to/file --invert-paths
+```
+
+If it was already pushed to a shared remote, treat the material as disclosed:
+rotate any keys and assume the file is public.

@@ -1,0 +1,1147 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Modern Media Storage Browser (5-Region Architecture)
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
+ *
+ * Visual Architecture:
+ * 1. Top Toolbar: Location, Breadcrumb Pills, Search, Item Counter
+ * 2. Left Sidebar: Places & Filters (USB, Internal Storage, Favorites, Recent Media)
+ * 3. Main File Area: 2x4 Media Card Grid (16:9 Visual Previews & Metadata)
+ * 4. Bottom Status Strip: Detailed Selection Specifications & Console Hints
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16dp;
+    color: #ffffff;
+    background-color: #06090e;
+    margin: 0;
+    padding: 0;
+    width: 1920dp;
+    height: 1080dp;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+/* -----------------------------------------------------------------------------
+ * Wallpaper + frosted chrome
+ *
+ * The toolbar pills, the sources sidebar and the status strip are translucent
+ * panels that blur the wallpaper; the media cards stay opaque so thumbnails
+ * and filenames keep their contrast, and so the page does not pay for a
+ * backdrop pass per card. Same split as Nautilus and macOS: the chrome is
+ * glass, the content is not.
+ * -------------------------------------------------------------------------- */
+#browser-wallpaper {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    decorator: image(../wallpaper/settings_bg.png cover);
+}
+
+/* Knocks the wallpaper back so panel text keeps contrast. Kept light: dim it
+ * too hard and there is no longer enough behind the glass to read as frost. */
+#browser-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #06090e8c;
+}
+
+#browser-pane {
+    position: absolute;
+    left: 152dp;
+    top: 0;
+    width: 1768dp;
+    height: 1080dp;
+}
+
+/* =========================== 1. Top Toolbar =========================== */
+
+#browser-header {
+    position: absolute;
+    left: 0;
+    top: 32dp;
+    width: 1704dp;
+    height: 56dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#browser-header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+}
+
+#browser-badge {
+    width: 44dp;
+    height: 44dp;
+    border-radius: 12dp;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#browser-badge-icon {
+    width: 24dp;
+    height: 24dp;
+}
+
+#browser-title-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+#browser-title {
+    display: block;
+    font-size: 22dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 2.5dp;
+}
+
+#browser-live-dot {
+    width: 7dp;
+    height: 7dp;
+    border-radius: 4dp;
+    background-color: #00cdff;
+}
+
+#browser-path {
+    display: inline-block;
+    background-color: #0e18289e;
+    backdrop-filter: blur(16dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 10dp;
+    padding: 6dp 16dp;
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #c2d2e8;
+    letter-spacing: 1.2dp;
+    max-width: 800dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#browser-header-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+}
+
+#browser-search-pill {
+    background-color: #0e18289e;
+    backdrop-filter: blur(16dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 10dp;
+    padding: 6dp 14dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.btn-glyph-sm {
+    width: 18dp;
+    height: 18dp;
+}
+
+.search-pill-label {
+    font-size: 12.5dp;
+    font-weight: bold;
+    color: #7e97b8;
+    letter-spacing: 1.2dp;
+}
+
+#browser-counter {
+    display: block;
+    background-color: #00cdff1a;
+    backdrop-filter: blur(16dp);
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 10dp;
+    padding: 6dp 14dp;
+    font-size: 12.5dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+/* ============================ 2. Left Sidebar ============================ */
+
+#browser-sidebar {
+    position: absolute;
+    left: 0;
+    top: 104dp;
+    width: 270dp;
+    height: 856dp;
+    background-color: #0b1220a8;
+    backdrop-filter: blur(26dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 16dp;
+    padding: 16dp 10dp;
+    display: flex;
+    flex-direction: column;
+    gap: 6dp;
+}
+
+.sb-section-title {
+    font-size: 11dp;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 2dp;
+    padding: 6dp 12dp 2dp 12dp;
+}
+
+.sb-section-divider {
+    height: 1dp;
+    background-color: #5a7db426;
+    margin: 8dp 8dp;
+}
+
+.sb-item {
+    width: 250dp;
+    height: 44dp;
+    border-radius: 10dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 0 12dp;
+    gap: 12dp;
+    background-color: transparent;
+    border-width: 1.5dp;
+    border-color: transparent;
+    transition: background-color 0.15s cubic-out, border-color 0.15s cubic-out, transform 0.15s cubic-out;
+}
+
+.sb-item-active {
+    background-color: #162a4a;
+    border-color: #5a7db466;
+}
+
+.sb-item-focused {
+    background-color: #00cdff26;
+    border-color: #00cdff;
+    transform: scale(1.02);
+}
+
+.sb-icon {
+    width: 22dp;
+    height: 22dp;
+}
+
+.sb-label {
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #7e97b8;
+    letter-spacing: 0.8dp;
+}
+
+.sb-item-active .sb-label {
+    color: #ffffff;
+}
+
+.sb-item-focused .sb-label {
+    color: #ffffff;
+}
+
+/* ========================= 3. Main Media Grid ========================= */
+
+#browser-grid-pane {
+    position: absolute;
+    left: 290dp;
+    top: 104dp;
+    width: 1414dp;
+    height: 856dp;
+    overflow: hidden;
+}
+
+#browser-grid {
+    width: 1414dp;
+    height: 856dp;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 16dp;
+}
+
+/* Translucent, but no backdrop-filter: the cards cover most of the page, and
+ * eight backdrop passes a frame would cost more than the difference is worth
+ * when what sits behind a card is smooth wallpaper and the card's own opaque
+ * thumbnail box covers the top half of it anyway. The tint alone is what
+ * carries the glass through the content area. */
+.grid-card {
+    width: 341dp;
+    height: 418dp;
+    background-color: #101a2cbf;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 16dp;
+    padding: 12dp;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    transition: transform 0.15s cubic-out, border-color 0.15s cubic-out, background-color 0.15s cubic-out;
+}
+
+.grid-card-focused {
+    background-color: #16243cf0;
+    border-width: 2.5dp;
+    border-color: #00cdff;
+    transform: scale(1.02);
+}
+
+.grid-card-hidden {
+    display: none;
+}
+
+.card-preview-box {
+    width: 317dp;
+    height: 184dp;
+    background-color: #070c16;
+    border-radius: 10dp;
+    border-width: 1dp;
+    border-color: #5a7db426;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.card-preview-art {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 317dp;
+    height: 184dp;
+    border-radius: 9dp;
+    display: none;
+}
+
+.card-preview-icon {
+    width: 52dp;
+    height: 52dp;
+}
+
+.card-badge {
+    position: absolute;
+    left: 8dp;
+    top: 8dp;
+    background-color: #06090ed9;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 6dp;
+    padding: 3dp 8dp;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #7ce4ff;
+    letter-spacing: 1.2dp;
+}
+
+.grid-card-focused .card-badge {
+    background-color: #00cdff33;
+    border-color: #00cdff;
+    color: #ffffff;
+}
+
+.card-fav {
+    display: none;
+    position: absolute;
+    right: 8dp;
+    top: 8dp;
+    width: 22dp;
+    height: 22dp;
+}
+
+.card-duration {
+    display: none;
+    position: absolute;
+    right: 8dp;
+    bottom: 8dp;
+    background-color: #06090ee6;
+    border-radius: 4dp;
+    padding: 2dp 6dp;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.card-track {
+    display: none;
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 317dp;
+    height: 4dp;
+    background-color: #142236;
+}
+
+.card-fill {
+    display: block;
+    width: 0%;
+    height: 4dp;
+    background-color: #00cdff;
+}
+
+.card-meta {
+    display: flex;
+    flex-direction: column;
+    margin-top: 10dp;
+    gap: 4dp;
+}
+
+.card-title {
+    display: block;
+    font-size: 18dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.2dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.card-sub {
+    display: block;
+    font-size: 13dp;
+    font-weight: normal;
+    color: #7e97b8;
+    margin-top: 2dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.grid-card-focused .card-sub {
+    color: #c2d2e8;
+}
+
+.card-action-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 10dp;
+    padding-top: 8dp;
+    border-top-width: 1dp;
+    border-top-color: #5a7db426;
+}
+
+.card-kind {
+    font-size: 11.5dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+.card-ext {
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 6dp;
+    padding: 2dp 6dp;
+    font-size: 10.5dp;
+    font-weight: bold;
+    color: #7ce4ff;
+}
+
+/* ============================ Empty State ============================ */
+
+#browser-empty {
+    position: absolute;
+    left: 0;
+    top: 220dp;
+    width: 1414dp;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+}
+
+#browser-empty-icon-box {
+    width: 108dp;
+    height: 108dp;
+    border-radius: 54dp;
+    background-color: #0e1828eb;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20dp;
+}
+
+#browser-empty-icon {
+    width: 48dp;
+    height: 48dp;
+}
+
+#browser-empty-title {
+    display: block;
+    font-size: 26dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 1dp;
+}
+
+#browser-empty-hint {
+    display: block;
+    font-size: 15dp;
+    font-weight: normal;
+    color: #7e97b8;
+    margin-top: 8dp;
+}
+
+/* ==================== 4. Bottom Status & Selection Strip ==================== */
+
+#browser-status-strip {
+    position: absolute;
+    left: 0;
+    bottom: 20dp;
+    width: 1704dp;
+    height: 60dp;
+    background-color: #0b1220a3;
+    backdrop-filter: blur(22dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 16dp;
+    padding: 0 18dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+#status-details {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+    max-width: 860dp;
+}
+
+.status-name {
+    font-size: 17dp;
+    font-weight: bold;
+    color: #ffffff;
+    max-width: 280dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#status-specs {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.status-spec-pill {
+    display: none;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 8dp;
+    padding: 4dp 10dp;
+    font-size: 11.5dp;
+    font-weight: bold;
+    color: #c2d2e8;
+}
+
+.status-probing {
+    display: none;
+    font-size: 12dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+#browser-footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 20dp;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.glyph-badge {
+    width: 32dp;
+    height: 32dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 16dp;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+}
+
+.glyph-badge-img {
+    width: 20dp;
+    height: 20dp;
+}
+
+.glyph-badge-pill {
+    padding: 4dp 9dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10dp;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+}
+
+.glyph-pill-text {
+    font-size: 11dp;
+    font-weight: bold;
+    color: #00cdff;
+}
+
+.footer-text {
+    font-size: 12.5dp;
+    font-weight: bold;
+    color: #8ea4c8;
+    letter-spacing: 1.2dp;
+}
+
+#browser-footer-version {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #8ea4c8;
+    margin-left: 10dp;
+}
+
+/* ===================== Folder filter chips (header row) =====================
+ * These used to be three rows in the sources panel labelled FILTERS, where
+ * they read as places rather than as a view of the folder in front of you -
+ * and they narrowed the whole drive rather than the folder. They now sit
+ * beside the path, because that is what they apply to.
+ *
+ * The row is only shown when the folder holds more than one kind of file, so
+ * the layout has to tolerate it being absent; everything here is inside the
+ * header's own flex row and collapses cleanly when hidden.
+ */
+#browser-filter-row {
+    display: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 10dp;
+    margin-left: 26dp;
+}
+
+#browser-filter-caption {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1.6dp;
+    margin-right: 4dp;
+}
+
+.browser-chip {
+    display: none;
+    padding: 6dp 18dp;
+    border-radius: 16dp;
+    border-width: 2dp;
+    border-color: #22314f;
+    background-color: #101a2a;
+    font-size: 15dp;
+    font-weight: bold;
+    color: #b2c3dc;
+    letter-spacing: 0.4dp;
+    transition: background-color 0.15s cubic-out, border-color 0.15s cubic-out;
+}
+
+/* Marker only. The fill and the label are set inline from the theme accent
+ * (and ink_on() picks the label for contrast); giving them values here too
+ * left the chip with a stylesheet fill under an inline label colour chosen
+ * for a different fill - dark on dark, unreadable. */
+.browser-chip-on {
+}
+
+/* The focus ring is a separate class from the selected fill: the cursor can
+ * sit on a chip that is not the active one. */
+.browser-chip-focused {
+    border-color: #00cdff;
+    border-width: 3dp;
+}
+
+#browser-filter-hint {
+    font-size: 13dp;
+    font-weight: normal;
+    color: #6b7d96;
+    margin-left: 8dp;
+}
+
+/* ================== File Operations Action Menu Modal ================== */
+
+#browser-action-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #06090ee8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.action-scrim-hidden {
+    display: none !important;
+}
+
+#browser-action-card {
+    width: 580dp;
+    border-radius: 20dp;
+    background-color: #0c1424fc;
+    border-width: 1.5dp;
+    border-color: #1e304d;
+    padding: 26dp 28dp;
+    display: flex;
+    flex-direction: column;
+    gap: 12dp;
+}
+
+#browser-action-header {
+    display: flex;
+    flex-direction: column;
+    gap: 10dp;
+    border-bottom-width: 1dp;
+    border-bottom-color: #1e304d;
+    padding-bottom: 14dp;
+}
+
+.action-header-badge {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.action-indicator {
+    width: 4dp;
+    height: 14dp;
+    background-color: #00cdff;
+    border-radius: 2dp;
+}
+
+#browser-action-eyebrow {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 2dp;
+}
+
+#action-target-card {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12dp;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #1f3554;
+    border-radius: 12dp;
+    padding: 10dp 14dp;
+}
+
+.action-target-icon {
+    width: 24dp;
+    height: 24dp;
+}
+
+.action-target-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2dp;
+    flex: 1;
+    overflow: hidden;
+}
+
+.action-target-title {
+    font-size: 16dp;
+    font-weight: bold;
+    color: #ffffff;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.action-target-sub {
+    font-size: 12dp;
+    color: #7e97b8;
+}
+
+.action-clip-badge {
+    display: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+    background-color: #0d2847;
+    border-width: 1dp;
+    border-color: #00cdff66;
+    border-radius: 8dp;
+    padding: 6dp 12dp;
+}
+
+.action-clip-icon {
+    width: 16dp;
+    height: 16dp;
+}
+
+.action-clip-text {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #00cdff;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#browser-action-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6dp;
+}
+
+.action-row {
+    height: 48dp;
+    border-radius: 12dp;
+    background-color: #101a2b;
+    border-width: 1.5dp;
+    border-color: #1a2a42;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 0 14dp;
+    gap: 12dp;
+}
+
+.action-row-focused {
+    background-color: #0d2545;
+    border-color: #00cdff;
+    border-width: 2dp;
+}
+
+.action-row-focused.action-row-danger-slot {
+    background-color: #381216;
+    border-color: #ff5a4f;
+    border-width: 2dp;
+}
+
+.action-row-disabled {
+    opacity: 0.35;
+}
+
+.act-icon-box {
+    width: 32dp;
+    height: 32dp;
+    border-radius: 8dp;
+    background-color: #16243a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.action-row-focused .act-icon-box {
+    background-color: #00cdff33;
+}
+
+.action-row-focused.action-row-danger-slot .act-icon-box {
+    background-color: #ff5a4f33;
+}
+
+.act-icon-img {
+    width: 18dp;
+    height: 18dp;
+}
+
+.act-text-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2dp;
+    flex: 1;
+}
+
+.act-label {
+    font-size: 14.5dp;
+    font-weight: bold;
+    color: #e2e8f0;
+}
+
+.action-row-focused .act-label {
+    color: #ffffff;
+}
+
+.action-row-focused.action-row-danger-slot .act-label {
+    color: #ff8882;
+}
+
+.act-desc {
+    font-size: 11dp;
+    color: #6b82a6;
+}
+
+.action-row-focused .act-desc {
+    color: #b0c9ec;
+}
+
+.action-row-focused.action-row-danger-slot .act-desc {
+    color: #fca5a5;
+}
+
+.act-glyph-badge {
+    width: 24dp;
+    height: 24dp;
+    border-radius: 12dp;
+    background-color: #16243a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.act-glyph-img {
+    width: 16dp;
+    height: 16dp;
+}
+
+#browser-action-footer {
+    display: flex;
+    flex-direction: row;
+    gap: 20dp;
+    margin-top: 6dp;
+    justify-content: flex-end;
+}
+
+/* ================== Dedicated File Transfer Progress Modal ================== */
+
+#browser-transfer-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #06090ee8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 150;
+}
+
+.transfer-scrim-hidden {
+    display: none !important;
+}
+
+#browser-transfer-card {
+    width: 760dp;
+    border-radius: 20dp;
+    background-color: #0c1424fc;
+    border-width: 1.5dp;
+    border-color: #1f3554;
+    padding: 34dp 38dp;
+    display: flex;
+    flex-direction: column;
+    gap: 20dp;
+}
+
+#transfer-header {
+    display: flex;
+    flex-direction: column;
+}
+
+#transfer-top-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+#transfer-op-pill {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+    background-color: #00cdff1f;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 14dp;
+    padding: 5dp 14dp;
+}
+
+.transfer-pulse-dot {
+    width: 8dp;
+    height: 8dp;
+    border-radius: 4dp;
+    background-color: #00cdff;
+}
+
+#transfer-op-title {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.5dp;
+}
+
+#transfer-speed-box {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6dp;
+    background-color: #08291f;
+    border-width: 1dp;
+    border-color: #10b98166;
+    border-radius: 12dp;
+    padding: 4dp 14dp;
+}
+
+.transfer-speed-icon {
+    font-size: 12dp;
+    color: #34d399;
+}
+
+#transfer-speed-pill {
+    font-size: 14dp;
+    font-weight: bold;
+    color: #34d399;
+    letter-spacing: 0.5dp;
+}
+
+#transfer-item-title {
+    font-size: 24dp;
+    font-weight: bold;
+    color: #ffffff;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    margin-top: 14dp;
+}
+
+#transfer-paths-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6dp;
+    margin-top: 12dp;
+    background-color: #101a2b;
+    border-width: 1dp;
+    border-color: #1a2a42;
+    border-radius: 10dp;
+    padding: 10dp 14dp;
+}
+
+.transfer-path-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10dp;
+}
+
+.transfer-path-tag {
+    font-size: 10.5dp;
+    font-weight: bold;
+    color: #5a7396;
+    letter-spacing: 1.2dp;
+    width: 38dp;
+}
+
+.transfer-path-val {
+    font-size: 13dp;
+    color: #c2d2e8;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    flex: 1;
+}
+
+#transfer-body {
+    display: flex;
+    flex-direction: column;
+    margin-top: 4dp;
+}
+
+#transfer-hero-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 12dp;
+}
+
+.transfer-hero-pct {
+    font-size: 46dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 0.5dp;
+    line-height: 46dp;
+}
+
+#transfer-meta-stats {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4dp;
+}
+
+.transfer-meta-pill {
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #c2d2e8;
+}
+
+#transfer-track {
+    width: 684dp;
+    height: 14dp;
+    background-color: #131f33;
+    border-width: 1dp;
+    border-color: #223756;
+    border-radius: 7dp;
+    overflow: hidden;
+    position: relative;
+}
+
+#transfer-fill {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background-color: #00cdff;
+    border-radius: 6dp;
+}
+
+#transfer-footer {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    margin-top: 12dp;
+}

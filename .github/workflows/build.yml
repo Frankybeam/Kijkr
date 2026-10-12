@@ -1,0 +1,357 @@
+# =============================================================================
+# Kijkr CI
+#
+# Runs the SAME Docker image developers use locally, so "works on my machine"
+# and "works in CI" mean the same thing. The image is built from this repo's
+# Dockerfile with the identical pinned versions.
+#
+# The PS5 is obviously not available to a GitHub runner, so nothing here
+# executes a payload. Hardware validation stays local and is tracked by hand in
+# docs/validation.md. CI's job is narrower: prove the environment still builds
+# and that every project still links.
+# =============================================================================
+name: build
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [main, develop, "experiment/**"]
+    paths-ignore: ["**/*.md", "docs/**"]
+  pull_request:
+    branches: [main, develop]
+    paths-ignore: ["**/*.md", "docs/**"]
+  workflow_dispatch:
+    inputs:
+      build_ffmpeg:
+        description: "Also build FFmpeg (slow, ~15 min)"
+        type: boolean
+        default: false
+
+env:
+  # Keep in sync with Dockerfile / docker-compose.yml.
+  LLVM_VERSION: "18"
+  PS5_SDK_VERSION: "v0.42"
+  PACBREW_VERSION: "v0.39"
+
+jobs:
+  # ===========================================================================
+  build-image:
+    name: Build dev image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image with layer cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: evo-player/ps5-dev:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            LLVM_VERSION=${{ env.LLVM_VERSION }}
+            PS5_SDK_VERSION=${{ env.PS5_SDK_VERSION }}
+            PACBREW_VERSION=${{ env.PACBREW_VERSION }}
+            INSTALL_PACBREW=1
+
+      - name: Fast export image
+        run: docker save evo-player/ps5-dev:ci | gzip -1 > /tmp/evo-image.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/evo-image.tar.gz
+          retention-days: 1
+
+  # ===========================================================================
+  verify-toolchain:
+    name: Verify SDK and toolchain
+    needs: build-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/download-artifact@v4
+        with: { name: docker-image, path: /tmp }
+      - run: docker load < /tmp/evo-image.tar.gz
+
+      # Covers the checklist items: Clang, LLD, CMake, Ninja, Python,
+      # pyelftools, SDK installed, SDK version documented, hello_world builds.
+      - name: setup-sdk.sh health check
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc 'bash ./scripts/setup-sdk.sh'
+
+  # ===========================================================================
+  build-projects:
+    name: Build project suite
+    needs: build-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/download-artifact@v4
+        with: { name: docker-image, path: /tmp }
+      - run: docker load < /tmp/evo-image.tar.gz
+
+      - name: Build Kijkr
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build-evoplayer.sh'
+
+      - name: Build via CMake + Ninja and emit compile_commands.json
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc 'bash ./scripts/gen-compile-commands.sh'
+
+      # ELF validation: every artifact must be a PS5 payload, not a host
+      # binary. build.sh already checks this, but assert it independently so a
+      # regression in build.sh cannot hide it.
+      - name: Validate ELFs
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc '
+              set -e
+              shopt -s nullglob
+              n=0
+              for f in output/elf/*.elf; do
+                echo "--- $f"
+                file "$f" | grep -q "ELF 64-bit LSB.*x86-64" \
+                  || { echo "not an x86-64 ELF"; exit 1; }
+                llvm-readelf -l "$f" | grep -q "/lib64/ld-linux" \
+                  && { echo "links the HOST loader - built with the wrong compiler"; exit 1; }
+                llvm-readelf -h "$f" | grep -qE "Type:.*(DYN|EXEC)" \
+                  || { echo "unexpected ELF type"; exit 1; }
+                n=$((n+1))
+              done
+              [ "$n" -ge 1 ] || { echo "expected >=1 payloads, found $n"; exit 1; }
+              echo "validated $n payload ELFs"
+            '
+
+      - name: Archive ELF artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps5-elf-payloads
+          path: |
+            output/elf/*.elf
+            compile_commands.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Archive build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: output/logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ===========================================================================
+  # #36: catch a broken app-module package (link tail, PRX stubs, MkPFS pack)
+  # on every PR, instead of finding out on a release tag. Runs --ffpfsc so a
+  # regression in the PFS packing itself (not just the compile) is also
+  # caught here rather than only in release.yml.
+  package-app:
+    name: Package app module (.ffpfsc)
+    needs: build-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/download-artifact@v4
+        with: { name: docker-image, path: /tmp }
+      - run: docker load < /tmp/evo-image.tar.gz
+
+      - name: Cache MkPFS toolchain
+        uses: actions/cache@v4
+        with:
+          path: .deps/MkPFS
+          key: mkpfs-${{ hashFiles('scripts/setup-pfs-tool.sh') }}
+
+      - name: package-app.sh --ffpfsc
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc './scripts/package-app.sh --ffpfsc'
+
+      # Same independent checks as release.yml's "Verify the release image" -
+      # kept in sync by hand since GHA has no clean way to share a step body
+      # across workflows without a composite action.
+      - name: Verify the app module is a validly-signed, non-empty PS5 module
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc '
+              set -e
+              APPDIR="output/app/PPSA99077"
+              IMG="output/app/PPSA99077.ffpfsc"
+
+              [ -f "$IMG" ] || { echo "missing $IMG - MkPFS pack failed"; exit 1; }
+
+              # eboot.bin is FSELF-wrapped (fake-signed) - file/readelf see
+              # its custom container header and report "data", not an ELF
+              # header. Check the pre-sign ELF package-app.sh keeps around
+              # for the "is this a real, non-host PS5 binary" question.
+              PRESIGN="output/app/.build/eboot.elf"
+              file "$PRESIGN" | grep -q "ELF 64-bit LSB.*x86-64" \
+                || { echo "$PRESIGN is not a PS5 ELF"; exit 1; }
+              llvm-readelf -l "$PRESIGN" | grep -q "/lib64/ld-linux" \
+                && { echo "$PRESIGN links the HOST loader - wrong compiler"; exit 1; }
+
+              F="$APPDIR/eboot.bin"
+              [ -f "$F" ] || { echo "missing $F"; exit 1; }
+              output/app/.build/host/ps5-native-tool self --inspect --file "$F" \
+                | tee /dev/stderr | grep -q "integrity: valid" \
+                || { echo "eboot.bin did not report a valid signed container"; exit 1; }
+
+              ASSET_BYTES="$(du -sb "$APPDIR/assets" | cut -f1)"
+              [ "$ASSET_BYTES" -gt 1000000 ] || { echo "assets/ is suspiciously small ($ASSET_BYTES bytes)"; exit 1; }
+
+              echo "ok: $IMG  $(stat -c %s "$IMG") bytes, assets ${ASSET_BYTES} bytes"
+            '
+
+      - name: Archive app module
+        uses: actions/upload-artifact@v4
+        with:
+          name: evoplayer-app-module
+          path: |
+            output/app/PPSA99077.ffpfsc
+            output/app/PPSA99077/
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
+  # FFmpeg is slow, so it is opt-in: run it manually via workflow_dispatch, or
+  # on demand. It is not a gate on ordinary pull requests.
+  build-ffmpeg:
+    name: Build FFmpeg (minimal)
+    needs: build-image
+    if: github.event_name == 'workflow_dispatch' && inputs.build_ffmpeg
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/download-artifact@v4
+        with: { name: docker-image, path: /tmp }
+      - run: docker load < /tmp/evo-image.tar.gz
+
+      - name: Build minimal profile
+        run: |
+          mkdir -p ffbuild
+          docker run --rm -v "$PWD:/workspace" -v "$PWD/ffbuild:/build/ffmpeg" \
+            -w /workspace --user root \
+            evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build-ffmpeg.sh --profile minimal'
+
+      - name: Archive codec inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-codec-inventory
+          path: output/logs/ffmpeg-*-codecs.txt
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # ProsperoPlayer baseline. Allowed to fail: it builds third-party code that
+  # can change without notice, and a red X there should not block EVO Player's
+  # own work. The log is archived either way.
+  build-prosperoplayer:
+    name: ProsperoPlayer baseline
+    needs: build-image
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/download-artifact@v4
+        with: { name: docker-image, path: /tmp }
+      - run: docker load < /tmp/evo-image.tar.gz
+
+      - name: Clone and build upstream unmodified
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build-prosperoplayer.sh'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prosperoplayer-baseline
+          path: |
+            output/elf/PS5MediaPlayerPRO.elf
+            output/logs/prosperoplayer-*.log
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # Native Unit Tests & Code Coverage Pipeline
+  # ===========================================================================
+  test-and-coverage:
+    name: Unit Tests & Code Coverage
+    needs: build-image
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with: { name: docker-image, path: /tmp }
+      - run: docker load < /tmp/evo-image.tar.gz
+
+      - name: Run Test Suite & Generate Coverage
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc 'bash ./tests/run_tests.sh'
+
+      - name: Archive Test Coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-coverage-report
+          path: |
+            output/tests/
+            output/coverage/
+          if-no-files-found: warn
+
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v3
+        if: env.SONAR_TOKEN != ''
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ===========================================================================
+  lint:
+    name: Shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          # SC1091: sourced files live in the container, not the runner.
+          shellcheck -e SC1091 -S warning scripts/*.sh

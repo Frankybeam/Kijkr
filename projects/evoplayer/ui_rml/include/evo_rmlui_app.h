@@ -1,0 +1,1023 @@
+#pragma once
+#include <RmlUi/Core.h>
+#include <cstring>
+#include <string>
+#include <vector>
+#include <memory>
+#include <utility>
+#include <unordered_map>
+#include "evo_rmlui_render.h"
+#include "evo_rmlui_system.h"
+#include "evo_rmlui_fileinterface.h"
+#include "evo_rmlui_bridge.h"   /* evo_perf_hud_t */
+
+struct EvoPlaybackState {
+    std::string title;
+    std::string meta;
+    std::string res_badge;
+    std::string hdr_badge;
+    std::string codec_badge;
+    std::string fps_badge;
+    std::string audio_badge;
+    std::string decoder_badge;   // #59
+    std::string upscale_badge;   // #103
+    bool upscale_active = false;
+    std::string smooth_badge;    // #105
+    bool smooth_active = false;
+    double position_sec = 0.0;
+    double duration_sec = 0.0;
+    double percentage = 0.0;
+    bool paused = false;
+    bool scrub_active = false;
+    double scrub_target = 0.0;
+    bool loading = false;
+    std::string audio_track;
+    std::string sub_track;
+    int sub_delay_ms = 0;
+    bool is_live = false;
+    int view_mode = 0; // 0=FIT, 1=FILL, 2=STRETCH
+    bool show_stats = false;
+    int alpha = 255;
+    std::string subtitle_text;   // #81: active caption, UTF-8, "\n"-separated
+    int subtitle_face = 2;       // EVO_FACE_SUB/MENU/TITLE
+    bool subtitle_raised = false;
+    std::string subtitle2_text;  // #110: secondary caption, same shape as subtitle_text
+    int subtitle2_position = 0;  // 0 stacked above the primary, 1 top of screen
+    int subtitle2_color = 0;     // 0 yellow, 1 cyan, 2 white
+    int subtitle_colour = 0;     // primary caption: 0 white, 1 yellow, 2 cyan, 3 green
+    int subtitle_background = 1; // 0 light, 1 medium, 2 solid, 3 transparent
+    int subtitle_position = 0;   // 0 default, 1 higher, 2 lower
+    bool chrome_hidden = false;  // render only the caption, hide the OSD chrome
+    int fps = 0;                 // #81: dev FPS pill
+    bool debug_overlay = false;
+    bool music_mode = false;     // #81: NOW PLAYING visualiser
+    std::string music_codec;
+
+    bool operator==(const EvoPlaybackState& o) const {
+        return title == o.title && meta == o.meta && res_badge == o.res_badge &&
+               hdr_badge == o.hdr_badge && codec_badge == o.codec_badge &&
+               fps_badge == o.fps_badge && audio_badge == o.audio_badge &&
+               decoder_badge == o.decoder_badge &&
+               upscale_badge == o.upscale_badge && upscale_active == o.upscale_active &&
+               smooth_badge == o.smooth_badge && smooth_active == o.smooth_active &&
+               position_sec == o.position_sec && duration_sec == o.duration_sec &&
+               percentage == o.percentage && paused == o.paused &&
+               scrub_active == o.scrub_active && scrub_target == o.scrub_target &&
+               loading == o.loading &&
+               audio_track == o.audio_track && sub_track == o.sub_track &&
+               sub_delay_ms == o.sub_delay_ms && is_live == o.is_live &&
+               view_mode == o.view_mode && show_stats == o.show_stats && alpha == o.alpha &&
+               subtitle_text == o.subtitle_text && subtitle_face == o.subtitle_face &&
+               subtitle_raised == o.subtitle_raised && chrome_hidden == o.chrome_hidden &&
+               subtitle2_text == o.subtitle2_text &&
+               subtitle2_position == o.subtitle2_position &&
+               subtitle2_color == o.subtitle2_color &&
+               subtitle_colour == o.subtitle_colour &&
+               subtitle_background == o.subtitle_background &&
+               subtitle_position == o.subtitle_position &&
+               fps == o.fps && debug_overlay == o.debug_overlay &&
+               music_mode == o.music_mode && music_codec == o.music_codec;
+    }
+    bool operator!=(const EvoPlaybackState& o) const { return !(*this == o); }
+};
+
+struct EvoDialogAction {
+    std::string icon_path;
+    std::string label;
+    bool is_primary = false;
+
+    bool operator==(const EvoDialogAction& o) const {
+        return icon_path == o.icon_path && label == o.label && is_primary == o.is_primary;
+    }
+    bool operator!=(const EvoDialogAction& o) const { return !(*this == o); }
+};
+
+struct EvoDialogState {
+    std::string eyebrow;
+    std::string title;
+    std::string detail;
+    double progress_pct = -1.0; // 0.0 to 1.0, or -1.0 to hide
+    int focused_action = -1;    // #65: D-pad-focused button index, -1 = none
+    std::vector<EvoDialogAction> actions;
+
+    bool operator==(const EvoDialogState& o) const {
+        return eyebrow == o.eyebrow && title == o.title && detail == o.detail &&
+               progress_pct == o.progress_pct && focused_action == o.focused_action &&
+               actions == o.actions;
+    }
+    bool operator!=(const EvoDialogState& o) const { return !(*this == o); }
+};
+
+struct EvoSettingsRow {
+    std::string title;
+    std::string detail;
+    std::string icon_path;
+    std::string badge;
+    bool has_chevron = true;
+    bool is_focused = false;
+    int  kind = 0;             /* EVO_RMLUI_ROW_* */
+    bool toggle_on = false;
+    bool is_disabled = false;
+
+    bool operator==(const EvoSettingsRow& o) const {
+        return title == o.title && detail == o.detail && icon_path == o.icon_path &&
+               badge == o.badge && has_chevron == o.has_chevron && is_focused == o.is_focused &&
+               kind == o.kind && toggle_on == o.toggle_on && is_disabled == o.is_disabled;
+    }
+    bool operator!=(const EvoSettingsRow& o) const { return !(*this == o); }
+};
+
+struct EvoSettingsState {
+    std::string title;
+    std::string subtitle;
+    std::string counter;
+    int rail_active_idx = 5;
+    bool rail_focused = false;
+    int section_active = -1;
+    bool sidebar_focused = false;
+    std::vector<EvoSettingsRow> rows;
+
+    bool operator==(const EvoSettingsState& o) const {
+        return title == o.title && subtitle == o.subtitle && counter == o.counter &&
+               rail_active_idx == o.rail_active_idx && rail_focused == o.rail_focused &&
+               section_active == o.section_active && sidebar_focused == o.sidebar_focused &&
+               rows == o.rows;
+    }
+    bool operator!=(const EvoSettingsState& o) const { return !(*this == o); }
+};
+
+struct EvoAboutState {
+    std::string app_name = "KIJKR";
+    std::string version;
+    std::string build_tag = "PS5 HOMEBREW";
+    std::string tagline;
+    std::string themes_info;
+    bool action_focused = true;
+
+    bool operator==(const EvoAboutState& o) const {
+        return app_name == o.app_name && version == o.version &&
+               build_tag == o.build_tag && tagline == o.tagline &&
+               themes_info == o.themes_info && action_focused == o.action_focused;
+    }
+    bool operator!=(const EvoAboutState& o) const { return !(*this == o); }
+};
+
+struct EvoSubtitlesTrack {
+    std::string label;
+    std::string detail;
+    bool is_current = false;
+    bool is_focused = false;
+    bool is_action = false;
+    bool is_disabled = false;
+    std::string tag;             // #110: "PRIMARY" / "SECONDARY", empty for none
+
+    bool operator==(const EvoSubtitlesTrack& o) const {
+        return label == o.label && detail == o.detail &&
+               is_current == o.is_current && is_focused == o.is_focused &&
+               is_action == o.is_action && is_disabled == o.is_disabled &&
+               tag == o.tag;
+    }
+    bool operator!=(const EvoSubtitlesTrack& o) const { return !(*this == o); }
+};
+
+struct EvoSubtitlesState {
+    std::string eyebrow;
+    std::string title;
+    std::string size_str;
+    std::string sync_str;
+    std::string sync2_str;       // #110: empty hides the secondary sync pill
+    std::string preview_text;
+    int preview_face = 1; // 0=small, 1=medium, 2=large
+    std::vector<EvoSubtitlesTrack> tracks;
+
+    bool operator==(const EvoSubtitlesState& o) const {
+        return eyebrow == o.eyebrow && title == o.title && size_str == o.size_str &&
+               sync_str == o.sync_str && sync2_str == o.sync2_str &&
+               preview_text == o.preview_text && preview_face == o.preview_face &&
+               tracks == o.tracks;
+    }
+    bool operator!=(const EvoSubtitlesState& o) const { return !(*this == o); }
+};
+
+struct EvoMediaInfoState {
+    std::string title;
+    std::string path;
+    std::string res_badge;
+    std::string hdr_badge;
+    std::string codec_badge;
+    std::string fps_badge;
+    std::string container;
+    std::string file_size;
+    std::string duration;
+    std::string video_codec;
+    std::string resolution;
+    std::string color_hdr;
+    std::string audio_codec;
+    std::string channels;
+    std::string sample_rate;
+    std::string subtitles;
+    std::string output;
+    std::string renderer;
+    std::string upscaler;
+    std::string motion_smoothing; // #105
+    std::string decoder;
+
+    bool operator==(const EvoMediaInfoState& o) const {
+        return title == o.title && path == o.path && res_badge == o.res_badge &&
+               hdr_badge == o.hdr_badge && codec_badge == o.codec_badge &&
+               fps_badge == o.fps_badge && container == o.container &&
+               file_size == o.file_size && duration == o.duration &&
+               video_codec == o.video_codec && resolution == o.resolution &&
+               color_hdr == o.color_hdr && audio_codec == o.audio_codec &&
+               channels == o.channels && sample_rate == o.sample_rate &&
+               subtitles == o.subtitles && output == o.output && renderer == o.renderer && upscaler == o.upscaler &&
+               motion_smoothing == o.motion_smoothing && decoder == o.decoder;
+    }
+    bool operator!=(const EvoMediaInfoState& o) const { return !(*this == o); }
+};
+
+struct EvoLaunchTile {
+    std::string title;
+    std::string detail;
+    std::string icon_path;
+    int progress = -1;
+    const uint32_t* art = nullptr;
+    int art_w = 0;
+    int art_h = 0;
+    bool is_focused = false;
+
+    bool operator==(const EvoLaunchTile& o) const {
+        return title == o.title && detail == o.detail && icon_path == o.icon_path &&
+               progress == o.progress && art == o.art && art_w == o.art_w &&
+               art_h == o.art_h && is_focused == o.is_focused;
+    }
+    bool operator!=(const EvoLaunchTile& o) const { return !(*this == o); }
+};
+
+struct EvoLaunchState {
+    std::string app_name = "KIJKR";
+    std::string version;
+    std::string clock;
+    std::string theme_name;
+
+    std::string hero_eyebrow;
+    std::string hero_title;
+    std::string hero_detail;
+    std::string hero_action;
+    int hero_progress = -1;
+    const uint32_t* hero_art = nullptr;
+    int hero_art_w = 0;
+    int hero_art_h = 0;
+    bool hero_focused = false;
+
+    int recent_total = 0;
+    int recent_cursor = -1;
+    std::vector<EvoLaunchTile> recent;
+    std::vector<EvoLaunchTile> library;
+
+    bool operator==(const EvoLaunchState& o) const {
+        return app_name == o.app_name && version == o.version && clock == o.clock &&
+               theme_name == o.theme_name && hero_eyebrow == o.hero_eyebrow &&
+               hero_title == o.hero_title && hero_detail == o.hero_detail &&
+               hero_action == o.hero_action && hero_progress == o.hero_progress &&
+               hero_art == o.hero_art && hero_art_w == o.hero_art_w &&
+               hero_art_h == o.hero_art_h && hero_focused == o.hero_focused &&
+               recent_total == o.recent_total && recent_cursor == o.recent_cursor &&
+               recent == o.recent && library == o.library;
+    }
+    bool operator!=(const EvoLaunchState& o) const { return !(*this == o); }
+};
+
+struct EvoListRow {
+    std::string title;
+    std::string detail;
+    std::string icon_path;
+    std::string badge;
+    int progress = -1;
+    bool has_chevron = false;
+    bool is_focused = false;
+
+    bool operator==(const EvoListRow& o) const {
+        return title == o.title && detail == o.detail && icon_path == o.icon_path &&
+               badge == o.badge && progress == o.progress &&
+               has_chevron == o.has_chevron && is_focused == o.is_focused;
+    }
+    bool operator!=(const EvoListRow& o) const { return !(*this == o); }
+};
+
+struct EvoListHint {
+    std::string glyph_path;
+    std::string label;
+
+    bool operator==(const EvoListHint& o) const {
+        return glyph_path == o.glyph_path && label == o.label;
+    }
+    bool operator!=(const EvoListHint& o) const { return !(*this == o); }
+};
+
+struct EvoListMenuRow {
+    std::string label;
+    std::string desc;
+    std::string icon_path;
+    bool danger = false;
+
+    bool operator==(const EvoListMenuRow& o) const {
+        return label == o.label && desc == o.desc && icon_path == o.icon_path &&
+               danger == o.danger;
+    }
+    bool operator!=(const EvoListMenuRow& o) const { return !(*this == o); }
+};
+
+struct EvoListState {
+    std::string title;
+    std::string subtitle;
+    int section = 0;
+    bool rail_focused = false;
+
+    int total_count = 0;
+    int cursor_index = -1;
+    std::vector<EvoListRow> rows;
+
+    bool is_empty = false;
+    std::string empty_title;
+    std::string empty_hint;
+    std::string empty_icon;
+
+    std::vector<EvoListHint> hints;
+
+    /* OPTIONS menu; empty = closed. */
+    std::vector<EvoListMenuRow> menu;
+    int menu_focus = 0;
+    std::string menu_eyebrow;
+    std::string menu_title;
+    std::string menu_sub;
+    std::string menu_icon;
+
+    bool operator==(const EvoListState& o) const {
+        return title == o.title && subtitle == o.subtitle && section == o.section &&
+               rail_focused == o.rail_focused && total_count == o.total_count &&
+               cursor_index == o.cursor_index && rows == o.rows &&
+               is_empty == o.is_empty && empty_title == o.empty_title &&
+               empty_hint == o.empty_hint && empty_icon == o.empty_icon && hints == o.hints &&
+               menu == o.menu && menu_focus == o.menu_focus &&
+               menu_eyebrow == o.menu_eyebrow && menu_title == o.menu_title &&
+               menu_sub == o.menu_sub && menu_icon == o.menu_icon;
+    }
+    bool operator!=(const EvoListState& o) const { return !(*this == o); }
+};
+
+struct EvoBrowserRow {
+    std::string name;
+    std::string detail;
+    std::string icon_path;
+    std::string badge;
+    std::string duration;
+    int progress = -1;
+    bool is_favorite = false;
+    bool is_focused = false;
+    const uint32_t* art = nullptr;
+    int art_w = 0;
+    int art_h = 0;
+
+    bool operator==(const EvoBrowserRow& o) const {
+        return name == o.name && detail == o.detail && icon_path == o.icon_path &&
+               badge == o.badge && duration == o.duration && progress == o.progress &&
+               is_favorite == o.is_favorite && is_focused == o.is_focused &&
+               art == o.art && art_w == o.art_w && art_h == o.art_h;
+    }
+    bool operator!=(const EvoBrowserRow& o) const { return !(*this == o); }
+};
+
+struct EvoBrowserState {
+    std::string path;
+    std::string title;
+    bool at_root = true;
+    bool rail_focused = false;
+
+    bool sidebar_focused = false;
+    int sidebar_index = 0;
+    int active_source = 0;
+
+    /* Folder filter chips. `filter_labels` holds only the chips this folder
+     * earned - "All" plus one per category actually present - so the row is
+     * empty when there is nothing to choose between. */
+    std::vector<std::string> filter_labels;
+    int filter_selected = 0;
+    bool filter_focused = false;
+
+    int total_count = 0;
+    int cursor_index = -1;
+    std::vector<EvoBrowserRow> rows;
+
+    bool is_empty = false;
+    std::string empty_title;
+    std::string empty_hint;
+
+    std::string ins_name;
+    std::string ins_kind;
+    std::string ins_ext;
+    bool ins_probing = false;
+    std::string ins_preview_badge;
+    const uint32_t* ins_preview = nullptr;
+    int ins_preview_w = 0;
+    int ins_preview_h = 0;
+    std::vector<std::pair<std::string, std::string>> ins_props;
+
+    std::string status_res;
+    std::string status_vcodec;
+    std::string status_acodec;
+    std::string status_duration;
+    std::string status_size;
+
+    bool action_menu_open = false;
+    int action_menu_focused = 0;
+    std::string action_menu_target;
+    bool action_paste_enabled = false;
+    std::string action_target_sub;
+    std::string action_clipboard_info;
+
+    bool transfer_modal_open = false;
+    std::string transfer_op_title;
+    std::string transfer_item_name;
+    std::string transfer_speed_str;
+    std::string transfer_bytes_str;
+    std::string transfer_eta_str;
+    std::string transfer_percent_str;
+    double transfer_progress_pct = 0.0;
+    std::string transfer_src_path;
+    std::string transfer_dst_path;
+
+    bool operator==(const EvoBrowserState& o) const {
+        return path == o.path && title == o.title && at_root == o.at_root && rail_focused == o.rail_focused &&
+               sidebar_focused == o.sidebar_focused && sidebar_index == o.sidebar_index && active_source == o.active_source &&
+               filter_labels == o.filter_labels && filter_selected == o.filter_selected &&
+               filter_focused == o.filter_focused &&
+               total_count == o.total_count && cursor_index == o.cursor_index &&
+               rows == o.rows && is_empty == o.is_empty && empty_title == o.empty_title &&
+               empty_hint == o.empty_hint && ins_name == o.ins_name &&
+               ins_kind == o.ins_kind && ins_ext == o.ins_ext &&
+               ins_probing == o.ins_probing && ins_preview_badge == o.ins_preview_badge &&
+               ins_preview == o.ins_preview && ins_preview_w == o.ins_preview_w &&
+               ins_preview_h == o.ins_preview_h && ins_props == o.ins_props &&
+               status_res == o.status_res && status_vcodec == o.status_vcodec &&
+               status_acodec == o.status_acodec && status_duration == o.status_duration &&
+               status_size == o.status_size &&
+               action_menu_open == o.action_menu_open && action_menu_focused == o.action_menu_focused &&
+               action_menu_target == o.action_menu_target && action_paste_enabled == o.action_paste_enabled &&
+               action_target_sub == o.action_target_sub && action_clipboard_info == o.action_clipboard_info &&
+               transfer_modal_open == o.transfer_modal_open && transfer_op_title == o.transfer_op_title &&
+               transfer_item_name == o.transfer_item_name && transfer_speed_str == o.transfer_speed_str &&
+               transfer_bytes_str == o.transfer_bytes_str && transfer_eta_str == o.transfer_eta_str &&
+               transfer_percent_str == o.transfer_percent_str && transfer_progress_pct == o.transfer_progress_pct &&
+               transfer_src_path == o.transfer_src_path && transfer_dst_path == o.transfer_dst_path;
+    }
+    bool operator!=(const EvoBrowserState& o) const { return !(*this == o); }
+};
+
+struct EvoChangelogRelease {
+    std::string version;
+    std::string tagline;
+    std::string date;
+    bool is_focused = false;
+
+    bool operator==(const EvoChangelogRelease& o) const {
+        return version == o.version && tagline == o.tagline &&
+               date == o.date && is_focused == o.is_focused;
+    }
+    bool operator!=(const EvoChangelogRelease& o) const { return !(*this == o); }
+};
+
+struct EvoChangelogState {
+    std::string title;
+    std::string subtitle;
+    bool rail_focused = false;
+
+    int release_total = 0;
+    int cursor_index = 0;
+    std::vector<EvoChangelogRelease> releases;
+
+    std::string detail_version;
+    std::string detail_tagline;
+    int item_total = 0;
+    std::vector<std::pair<std::string, std::string>> items;
+
+    bool operator==(const EvoChangelogState& o) const {
+        return title == o.title && subtitle == o.subtitle && rail_focused == o.rail_focused &&
+               release_total == o.release_total && cursor_index == o.cursor_index &&
+               releases == o.releases && detail_version == o.detail_version &&
+               detail_tagline == o.detail_tagline && item_total == o.item_total &&
+               items == o.items;
+    }
+    bool operator!=(const EvoChangelogState& o) const { return !(*this == o); }
+};
+
+struct EvoReaderState {
+    std::string title;
+    std::string subtitle;
+    std::string badge;
+    bool rail_focused = false;
+
+    std::vector<std::string> lines;
+    int face = 0;
+
+    double progress = 0.0;
+    double visible_frac = 1.0;
+
+    std::string notice;
+    std::string footnote;
+
+    bool operator==(const EvoReaderState& o) const {
+        return title == o.title && subtitle == o.subtitle && badge == o.badge &&
+               rail_focused == o.rail_focused && lines == o.lines && face == o.face &&
+               progress == o.progress && visible_frac == o.visible_frac &&
+               notice == o.notice && footnote == o.footnote;
+    }
+    bool operator!=(const EvoReaderState& o) const { return !(*this == o); }
+};
+
+/* #81: full-screen photo / image viewer (replaces main.c's draw_image_screen). */
+struct EvoImageState {
+    std::string title;
+    std::string dims;         // "1920 x 1080" or "IMAGE FILE"
+    bool loaded = false;
+    const uint32_t* pixels = nullptr;
+    int w = 0;
+    int h = 0;
+
+    bool operator==(const EvoImageState& o) const {
+        return title == o.title && dims == o.dims && loaded == o.loaded &&
+               pixels == o.pixels && w == o.w && h == o.h;
+    }
+    bool operator!=(const EvoImageState& o) const { return !(*this == o); }
+};
+
+/* The surround params by value, with their strings owned here. Pointer fields
+ * in `p` are nulled so the byte compare below sees only real state; the bridge
+ * zero-fills `p` first, so padding compares equal too. */
+struct EvoSurroundState {
+    evo_rmlui_surround_params_t p;
+    std::string names[EVO_RMLUI_SURROUND_SPEAKERS];
+    std::string labels[EVO_RMLUI_SURROUND_SPEAKERS];
+    std::string cal_message;
+
+    EvoSurroundState() { std::memset(&p, 0, sizeof(p)); }
+
+    bool operator==(const EvoSurroundState& o) const {
+        if (std::memcmp(&p, &o.p, sizeof(p)) != 0 || cal_message != o.cal_message) return false;
+        for (int i = 0; i < EVO_RMLUI_SURROUND_SPEAKERS; i++)
+            if (names[i] != o.names[i] || labels[i] != o.labels[i]) return false;
+        return true;
+    }
+    bool operator!=(const EvoSurroundState& o) const { return !(*this == o); }
+};
+
+
+struct EvoThemeColors {
+    /*
+     * Packed 0xAABBGGRR, the same order EVO_RGBA() produces in evo_theme.c —
+     * these are read back byte-for-byte by to_hex_rgb(). They used to be
+     * written 0xAARRGGBB, which rendered MIDNIGHT's cyan accent as gold in
+     * every frame drawn before main.c pushed the real theme, and in every
+     * host uiview render, which never pushes one at all.
+     */
+    std::string name = "MIDNIGHT";
+    uint32_t bg_top = 0xFF160D08;
+    uint32_t bg_bottom = 0xFF0A0503;
+    uint32_t surface = 0xF02C1A10;
+    uint32_t surface_sel = 0xFA3A2216;
+    uint32_t border = 0x33B47D5A;
+    uint32_t border_sel = 0xFF00CDFF;
+    uint32_t accent = 0xFF00CDFF;
+    uint32_t accent_soft = 0x3200CDFF;
+    uint32_t accent_alt = 0xFFFFCD00;
+    uint32_t text_primary = 0xFFFFF4EE;
+    uint32_t text_secondary = 0xFFD0B6A3;
+    uint32_t text_muted = 0xFF8C715E;
+};
+
+struct EvoNavState {
+    int active_section = 5; /* 0=HOME 1=BROWSE 2=RECENT 3=FAV 4=EMBY 5=SETTINGS 6=ABOUT */
+    int rail_focused = 0;   /* 0=collapsed icon strip, 1=expanded labelled panel */
+    int cursor_index = 5;   /* which item has cursor when expanded */
+    int visible = 1;        /* 1=show the nav rail, 0=hide (full-screen OSD etc.) */
+    int fps = 0;            /* render FPS shown in the rail pill */
+    int show_fps = 0;       /* DEBUG OVERLAY setting */
+    int storage_locked = 0; /* 1 = sandbox never lifted; show the banner */
+
+    bool operator==(const EvoNavState& o) const {
+        return active_section == o.active_section && rail_focused == o.rail_focused &&
+               cursor_index == o.cursor_index && visible == o.visible &&
+               fps == o.fps && show_fps == o.show_fps &&
+               storage_locked == o.storage_locked;
+    }
+    bool operator!=(const EvoNavState& o) const { return !(*this == o); }
+};
+
+/*
+ * #75: toast notifications. Lives in its OWN Rml::Context (m_toast_context),
+ * separate from the menu/OSD documents in m_context - a toast has to
+ * composite on top of whichever screen is active (menu, playback OSD,
+ * dialog, ...) without disturbing that screen's own Show()/Hide() state or,
+ * for cached menu screens (RenderCachedScreen), forcing a full re-rasterise
+ * on every animation frame the way sharing the main context would. Its own
+ * context is cheap to render every frame regardless - the document is a
+ * single small card, nothing like a full 1920x1080 screen.
+ */
+struct EvoToastState {
+    std::string title;
+    std::string message;
+    int kind = 0;        /* 0=info 1=tech 2=error 3=ok - see evo_rmlui_bridge.h */
+    bool visible = false;
+    int alpha = 0;        /* 0..255, caller owns the fade (matches the old evo_toast timing) */
+    int slide = 0;        /* px still to travel on the way in */
+};
+
+class EvoRmlApp {
+
+public:
+    static EvoRmlApp& Instance();
+
+    bool Initialize(int width, int height);
+    void Shutdown();
+
+    void SetTheme(const EvoThemeColors& theme);
+    void SetVersion(const std::string& v) { m_version = v; }
+    const EvoThemeColors& GetTheme() const { return m_theme; }
+
+    void UpdateChangelogState(const EvoChangelogState& state);
+    void RenderChangelog(uint32_t* framebuffer, int width, int height);
+
+    void UpdateReaderState(const EvoReaderState& state);
+    void RenderReader(uint32_t* framebuffer, int width, int height);
+
+    void UpdateImageState(const EvoImageState& state);   // #81
+    void RenderImage(uint32_t* framebuffer, int width, int height);
+
+    void UpdateSurroundState(const EvoSurroundState& state);
+    void RenderSurround(uint32_t* framebuffer, int width, int height);
+
+    void UpdateBrowserState(const EvoBrowserState& state);
+    void RenderBrowser(uint32_t* framebuffer, int width, int height);
+
+    void UpdateListState(const EvoListState& state);
+    void RenderList(uint32_t* framebuffer, int width, int height);
+
+    void UpdateLaunchState(const EvoLaunchState& state);
+    void RenderLaunch(uint32_t* framebuffer, int width, int height);
+
+    void UpdatePlaybackState(const EvoPlaybackState& state);
+    void UpdatePerfHud(const evo_perf_hud_t* hud);   // #81/#63 diagnostic HUD
+    void RenderPlaybackOSD(uint32_t* framebuffer, int width, int height);
+
+    void UpdateDialogState(const EvoDialogState& state);
+    void RenderDialog(uint32_t* framebuffer, int width, int height);
+
+    void UpdateSettingsState(const EvoSettingsState& state);
+    void RenderSettings(uint32_t* framebuffer, int width, int height);
+
+    void UpdateAboutState(const EvoAboutState& state);
+    void RenderAbout(uint32_t* framebuffer, int width, int height);
+    /* Safe-to-close screen (closed.rml): stateless, themed on every render. */
+    void RenderClosed(uint32_t* framebuffer, int width, int height);
+
+    void UpdateSubtitlesState(const EvoSubtitlesState& state);
+    void RenderSubtitles(uint32_t* framebuffer, int width, int height);
+
+    void UpdateMediaInfoState(const EvoMediaInfoState& state);
+    void RenderMediaInfo(uint32_t* framebuffer, int width, int height);
+
+    /* Sidebar navigation rail — call UpdateNavState before any Render* call */
+    void UpdateNavState(const EvoNavState& state);
+
+    /*
+     * #75: toast notifications - own context (see EvoToastState), composited
+     * over whatever the caller already rendered into framebuffer this frame.
+     * Call RenderToast() AFTER the screen's own Render*() call, every frame
+     * evo_toast.c's timing considers the toast live (matches the old
+     * draw_prospero_toast(fb) call site in main.c exactly).
+     */
+    void UpdateToastState(const EvoToastState& state);
+    void SetOverlayDimensions(Rml::Context* ctx, int width, int height);
+    void RenderToast(uint32_t* framebuffer, int width, int height);
+
+    /*
+     * #90: composite the navigation rail over a provider screen.
+     *
+     * A provider document lives in its own Rml context, so the rail - which is
+     * a document in the MAIN context alongside every EVO screen - does not
+     * come with it. Rendering the main context with every screen document
+     * hidden leaves just the rail, and navbar.rcss keeps its body transparent,
+     * so it composites over whatever the provider already drew.
+     *
+     * Not routed through RenderCachedScreen: that owns the cached menu surface
+     * for whichever EVO screen was last up, and a provider screen must not
+     * invalidate it.
+     */
+    void RenderNavOverlay(uint32_t* framebuffer, int width, int height);
+
+    /* #81: virtual keyboard modal - own context, composited over the screen. */
+    void UpdateKeyboard(const evo_keyboard_params_t* p);
+    void RenderKeyboard(uint32_t* framebuffer, int width, int height);
+
+    /*
+     * Dev debug overlay - the menu-screen FPS pill (GL-5 kept it player-only;
+     * this restores it for every other screen). Own context, same convention as
+     * the toast: call UpdateDebugOverlay() then RenderDebugOverlay() AFTER the
+     * screen's own Render* call. `visible` follows show_debug_overlay; when it
+     * is up GlNeedsFrame() ticks ~2 Hz so the number keeps counting on an
+     * otherwise-idle (change-gated) menu.
+     */
+    void UpdateDebugOverlay(int fps, bool visible);
+    void RenderDebugOverlay(uint32_t* framebuffer, int width, int height);
+
+    bool IsInitialized() const { return m_initialized; }
+
+    /*
+     * #90: the provider host owns its own Rml context but renders through the
+     * one active render interface, and scales itself with the same dp ratio as
+     * every other context. Exposed rather than duplicated because there is
+     * exactly one render interface per process and the provider host must not
+     * be the thing that decides which.
+     */
+    EvoRenderBridge* RenderBridge() const { return m_render.get(); }
+    float DpRatio() const { return m_dp_ratio; }
+    /* Mark the cached menu surface stale, so a provider screen that changed
+     * gets re-rasterised by the device loop's next active frame. */
+    void MarkFrameDirty() { m_frame_dirty = true; }
+
+private:
+    EvoRmlApp();
+    ~EvoRmlApp();
+
+    bool m_initialized = false;
+    int m_width = 1920;
+    int m_height = 1080;
+
+    std::unique_ptr<EvoSystemInterface> m_system;
+    /* The active RmlUi render interface, behind the EvoRenderBridge seam:
+     * EvoRenderInterface (CPU coverage rasteriser, the device path) or, on the
+     * host with EVO_RML_GL set, EvoRenderInterfaceGL (RmlUi's GL3 backend -
+     * render-overhaul GL-2, #78). */
+    std::unique_ptr<EvoRenderBridge> m_render;
+    /* #60: serves .rml/.rcss/.ttf out of the embedded bundle - see
+     * evo_rmlui_fileinterface.h. Owned here so it outlives Rml::Initialise(),
+     * which only stores the raw pointer Rml::SetFileInterface() is given. */
+    std::unique_ptr<EvoRmlFileInterface> m_file_interface;
+    Rml::Context* m_context = nullptr;
+    /* panel width / EVO_UI_DESIGN_W; 1.0 at 1080p. Applied to every context. */
+    float m_dp_ratio = 1.0f;
+    Rml::ElementDocument* m_launch_doc = nullptr;
+    Rml::ElementDocument* m_list_doc = nullptr;
+    Rml::ElementDocument* m_browser_doc = nullptr;
+    Rml::ElementDocument* m_changelog_doc = nullptr;
+    Rml::ElementDocument* m_reader_doc = nullptr;
+    Rml::ElementDocument* m_image_doc = nullptr;   // #81
+    Rml::ElementDocument* m_surround_doc = nullptr;
+    Rml::ElementDocument* m_playback_doc = nullptr;
+    Rml::ElementDocument* m_dialog_doc = nullptr;
+    Rml::ElementDocument* m_settings_doc = nullptr;
+    Rml::ElementDocument* m_about_doc = nullptr;
+    Rml::ElementDocument* m_closed_doc = nullptr;
+    Rml::ElementDocument* m_subtitles_doc = nullptr;
+    Rml::ElementDocument* m_mediainfo_doc = nullptr;
+    Rml::ElementDocument* m_nav_doc = nullptr;
+
+    /* #75: separate context - see the comment on EvoToastState. Content
+     * (title/message/kind) is diffed separately from the per-frame
+     * alpha/slide animation values, which always re-apply - see
+     * UpdateToastState. */
+    Rml::Context* m_toast_context = nullptr;
+    Rml::ElementDocument* m_toast_doc = nullptr;
+    std::string m_toast_last_title;
+    std::string m_toast_last_message;
+    int m_toast_last_kind = -1;
+
+    /* #81: virtual keyboard - own context (same rationale as the toast). */
+    Rml::Context* m_keyboard_context = nullptr;
+    Rml::ElementDocument* m_keyboard_doc = nullptr;
+    std::string m_kb_sig;   /* cheap change gate for UpdateKeyboard */
+
+    /* Dev debug overlay (menu FPS pill) - own context, same rationale. */
+    Rml::Context* m_debug_context = nullptr;
+    Rml::ElementDocument* m_debug_doc = nullptr;
+    bool m_debug_visible = false;
+    int  m_debug_last_fps = -1;
+    long long m_debug_tick_ms = 0;   /* GlNeedsFrame ~2 Hz refresh timer */
+
+    EvoThemeColors m_theme;
+    std::string m_version;
+    EvoLaunchState m_last_launch;
+    EvoListState m_last_list;
+    EvoBrowserState m_last_browser;
+    EvoChangelogState m_last_changelog;
+    EvoReaderState m_last_reader;
+    EvoImageState  m_last_image;
+    EvoSurroundState m_last_surround;
+    EvoPlaybackState m_last_state;
+
+    /*
+     * Bumped on every SetTheme call. Each Update*State call skips its whole
+     * body - all the SetProperty/SetInnerRML work - when the incoming state
+     * struct equals the one from last frame AND the theme has not moved
+     * since that frame was processed. Without the generation check, a screen
+     * sitting idle (state unchanged) would miss a live theme switch until
+     * something else about it also happened to change.
+     *
+     * This exists because RmlUi's SetProperty always marks its target dirty
+     * regardless of whether the value actually changed, forcing a full
+     * geometry/decorator rebuild - so calling it on unchanged state every
+     * single frame (the previous behavior here) measured 6-7 fps on the
+     * launch screen on real hardware, slow enough that the pad is polled too
+     * rarely to reliably catch a normal button tap.
+     */
+    int m_theme_generation = 0;
+    int m_theme_gen_launch = -1;
+    int m_theme_gen_list = -1;
+    int m_theme_gen_browser = -1;
+    int m_theme_gen_changelog = -1;
+    int m_theme_gen_reader = -1;
+    int m_theme_gen_image = -1;
+    int m_theme_gen_surround = -1;
+    int m_theme_gen_playback = -1;
+    int m_theme_gen_dialog = -1;
+    int m_theme_gen_settings = -1;
+    int m_theme_gen_about = -1;
+    int m_theme_gen_subtitles = -1;
+    int m_theme_gen_mediainfo = -1;
+    int m_theme_gen_nav = -1;
+
+    /*
+     * RmlUi caches textures by source string, so a poster whose pixels change
+     * has to change name too or the stale frame is served forever. Each art
+     * slot (0 = hero, 1..6 = the recent shelf) carries a generation that bumps
+     * when its pixels do, and the previous generation is released on the way.
+     */
+    /* Rows the list document actually contains. Must stay in step with
+     * EVO_RMLUI_LIST_ROWS in evo_rmlui_bridge.h and with list.rml. */
+    static const int kListRows = 9;
+    static const int kListMenuRows = 7;   /* EVO_RMLUI_LIST_MENU_ROWS */
+
+    /* Must stay in step with EVO_RMLUI_BROWSER_ROWS / _PROPS and browser.rml. */
+    static const int kBrowserRows = 12;
+    static const int kBrowserProps = 9;
+
+    /* Must stay in step with EVO_RMLUI_CL_* and changelog.rml. */
+    static const int kChangelogReleases = 8;
+    static const int kChangelogItems = 14;
+    static const int kReaderLines = 64;
+    static const int kSurroundSpeakers = 8;
+
+    /* 0 = hero, 1..6 = the recent shelf, 7 = the browser preview,
+     * 8 = the #81 full-screen image viewer,
+     * 9..20 = browser card thumbnails (12 slots). */
+    static const int kBrowserArtSlot = 7;
+    static const int kImageArtSlot = 8;
+    static const int kBrowserCardArtSlot = 9;
+    static const int kBrowserCardArtSlots = 12;
+    /* 21 = the scrub preview (#32): the frame prospero_thumbnail decoded for
+     * the position under the play head while the seek bar is being dragged. */
+    static const int kScrubArtSlot = 21;
+    static const int kArtSlots = 1 + 6 + 1 + 1 + 12 + 1;
+    int m_art_generation[kArtSlots] = {};
+    const uint32_t* m_art_last_ptr[kArtSlots] = {};
+    int m_art_last_dims[kArtSlots][2] = {};
+    /* The cover cache reuses buffers, so an unchanged pointer does not mean
+     * unchanged pixels. The item's title rides along as the content tag. */
+    std::string m_art_last_tag[kArtSlots];
+    std::string m_art_source[kArtSlots];
+    std::string ArtSource(int slot, const uint32_t* pixels, int w, int h,
+                          const std::string& tag);
+
+    /* Scrub preview state: the decoded frame staged for upload, and the
+     * worker's serial for the frame already uploaded. See UpdateScrubPreview()
+     * in evo_rmlui_app.cpp. */
+    std::vector<uint32_t> m_scrub_thumb_pixels;
+    unsigned long long    m_scrub_thumb_serial = 0;
+    /* The worker's serial as the drag began. Anything at or below it was
+     * decoded for a previous scrub, so showing it would put a frame from the
+     * wrong position under the timecode for the first frame or two. */
+    unsigned long long    m_scrub_thumb_baseline = 0;
+    bool                  m_scrub_thumb_shown = false;
+    void UpdateScrubPreview(const EvoPlaybackState& state);
+    EvoDialogState m_last_dialog;
+    EvoSettingsState m_last_settings;
+    EvoAboutState m_last_about;
+    EvoSubtitlesState m_last_subtitles;
+    EvoMediaInfoState m_last_mediainfo;
+    EvoNavState m_last_nav;
+
+    /*
+     * RmlUi's ElementImage::OnPropertyChange marks geometry dirty on ANY
+     * image-color SetProperty call, regardless of whether the value actually
+     * changed - SetProperty itself never diffs against the current value.
+     * Icon tinting is recomputed every frame (nav rail runs every screen,
+     * every frame, via evo_sync_rmlui_nav), so without this cache every icon
+     * rebuilds its geometry every frame even when its colour is unchanged
+     * from the last one - the cost that made the navbar miss D-pad presses.
+     */
+    std::unordered_map<Rml::Element*, std::string> m_image_color_cache;
+    void SetImageColor(Rml::Element* el, const std::string& color);
+
+    /*
+     * Long-text marquee, matching the legacy evo_text_marquee ping-pong. Only
+     * used on the playback OSD title (#media-title): that document is not in
+     * the Step-1 surface cache, so scrolling it costs nothing extra, whereas
+     * marqueeing a cached menu row would force a full re-raster every frame.
+     * The menu/list rows keep the static text-overflow: ellipsis in their RCSS.
+     */
+    struct MarqueeState { bool active = false; double start = 0.0; float travel = 0.0f; };
+    std::unordered_map<Rml::Element*, MarqueeState> m_marquee;
+    void MarqueeTick(Rml::Element* el, bool active);
+
+    /*
+     * State-diffing in Update*State only avoids RE-STYLING unchanged
+     * elements; it does nothing about the cost of Context::Render() itself,
+     * which walks and CPU-rasterizes every visible element every time it is
+     * called regardless of whether anything is dirty - measured at 6-7 fps
+     * on the launch screen with state-diffing already in place and skipping
+     * ~97% of Update calls (host profile: Context::Update 0.1 ms, the whole
+     * ~120 ms frame is the render-interface raster). That render pass is what
+     * needs skipping on an unchanged frame.
+     *
+     * Step 1 of docs/evo-pro/gpu-rendering-plan.md: the full-screen menu
+     * documents (launch, list, browser, settings, changelog, reader,
+     * surround) are opaque, cover the whole 1080p frame, and - the RCSS
+     * carries no transitions or animations - never change between input
+     * events. Each rasterizes into m_surface ONLY when m_frame_dirty (a real
+     * state / theme / nav change set it), the visible screen switched, or the
+     * surface was (re)sized; every frame then blits m_surface into the
+     * caller's rotating VideoOut buffer (~0.5 ms memcpy). The blitted pixels
+     * are exactly what Context::Render() last produced, so parity holds.
+     *
+     * Overlay screens that compose over live video (playback OSD, dialog,
+     * subtitle picker, media info) are NOT cached - they keep rendering
+     * straight into the framebuffer every frame, unchanged.
+     */
+    bool m_frame_dirty = true;
+    std::vector<uint32_t> m_surface;
+    int m_surface_w = 0;
+    int m_surface_h = 0;
+    int m_cached_screen = -1;
+    void RenderCachedScreen(int screen_id, uint32_t* framebuffer, int width, int height);
+
+    /*
+     * Show `keep` and hide every other full-screen document in the main context.
+     *
+     * Each Render* used to carry its own hand-maintained hide list, and adding a
+     * screen meant remembering to add it to twelve of them. image.rml (#81) was
+     * added to none: the image viewer's document stayed visible under every
+     * later screen, invisible behind an opaque menu but painting the whole frame
+     * through the playback OSD's transparent background - so starting a video
+     * after viewing an image showed the image instead of the film. One list, in
+     * one place, is the fix for the class rather than the instance.
+     *
+     * The nav rail is deliberately not included: it is a companion document
+     * whose visibility comes from UpdateNavState, and each caller handles it.
+     */
+    void ShowOnlyScreen(Rml::ElementDocument* keep);
+
+public:
+    /* GL-3 (#79) B2 device loop. Retained-mode + ps5-opengl can't re-raster at
+     * 60 Hz, so the loop only redraws + swaps on change. Per frame, main.c:
+     *   a = GlNeedsFrame();          // dirty || overlay visible || warm-up
+     *   GlSetActive(a);              // gate for RenderCachedScreen this frame
+     *   ... run the dispatch (update calls always run, so input sets dirty) ...
+     *   if (a && GlConsumeDrew()) { present(); GlEndFrame(); }  // clears dirty
+     */
+    bool GlNeedsFrame();
+    void GlSetActive(bool a) { m_gl_active = a; }
+    bool GlActive() const { return m_gl_active; }
+    bool GlConsumeDrew() { bool d = m_drew; m_drew = false; return d; }
+    /* A ps5-homebrew-ui screen (ui_kit/) drew into this frame instead. */
+    void NoteExternalDraw() {
+        m_drew = true;
+        /* The kit screen replaces whatever RmlUi screen was up - including a
+         * dialog left visible by the screen we came from. A modal rendered
+         * after it this frame shows its own document again. */
+        ShowOnlyScreen(nullptr);
+        if (m_nav_doc) m_nav_doc->Hide();
+    }
+    /* A kit overlay drew over this frame's screen: only RmlUi's own copy of
+     * that overlay goes away; the screen under it is left as it is. */
+    void NoteExternalDialog() {
+        m_drew = true;
+        if (m_dialog_doc) m_dialog_doc->Hide();
+    }
+    void NoteExternalKeyboard() { m_drew = true; }
+    void NoteExternalToast() {
+        m_drew = true;
+        if (m_toast_doc) m_toast_doc->Hide();
+    }
+    void GlEndFrame() { m_frame_dirty = false; }
+    /* true  = CPU coverage rasteriser + one GL blit (default; ps5-opengl's fast
+     *         path). false = RmlUi renders itself through RenderInterface_GL3
+     *         (selectable via /mnt/usb0/evo_gl_rmlui - slow on ps5-opengl G47,
+     *         kept for when the driver's render-to-texture path improves). */
+    bool GlBlitMode() const { return m_blit_mode; }
+private:
+    int  m_gl_warmup = 3;
+    bool m_drew = false;
+    bool m_gl_active = false;
+    bool m_blit_mode = true;
+};
+

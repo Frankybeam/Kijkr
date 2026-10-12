@@ -1,0 +1,1177 @@
+# Tooling
+
+Everything in `scripts/` and `tools/`, and when to reach for it.
+
+Two rules that save time:
+
+- **Never call `make` directly.** The project Makefile does not list FFmpeg's
+  transitive dependencies, and static archives carry no dependency metadata, so
+  a bare `make` fails at link. `scripts/build-evoplayer.sh` supplies them.
+- **Everything runs in the pinned container.** The scripts re-exec themselves
+  through `docker compose` when run from Windows, so you can call them either
+  way, but the toolchain only exists inside.
+
+---
+
+## The short version
+
+**One render path: bare-metal `sceAgc`.** `media/src/evo_agc_runtime.c` owns
+`sceAgc` and `sceVideoOut` outright and there is no alternative backend.
+Changing a shader means rebuilding it in a *second* Docker image — read
+[Shader pipelines](#shader-pipelines---agc-builds) before touching anything
+under `projects/evoplayer/shaders/agc/`.
+
+```bash
+# the ONLY hardware path — build + deploy the app module
+docker compose run --rm ps5-dev bash -lc '
+  ./scripts/package-app.sh --ffpfsc
+  ./scripts/deploy-app.sh --ffpfsc'
+# ShadowMount+ v1.7 test-mounts the new image but does NOT launch it:
+# tools/evo-remote.sh launch (or the Games row);
+# otherwise launch it from the Games row. PS-button-close a running EVO first.
+
+# watch the console log (separate terminal, keeps a record)
+docker compose run --rm ps5-dev ./tools/klog.sh
+
+# unattended: build/deploy + drive playback over FTP, pull the boot log
+docker compose run --rm ps5-dev bash -lc './tools/evo-remote.sh build --usb-remote'
+docker compose run --rm ps5-dev ./tools/evo-remote.sh status
+docker compose run --rm ps5-dev ./tools/evo-remote.sh key down cross   # prints where focus landed (#115)
+
+# a UI/layout question? render on the host, no console:
+./tools/uiview.sh --all      # -> output/uiview/rml_*.png
+
+# prefer a window? one panel over all of the above:
+python tools/evo-panel.py    # package (all flags) / deploy / evo-remote /
+                             # log pull / uiview / klog / shot — streamed output
+```
+
+`tools/launch.sh` and `scripts/deploy.sh` were deleted 2026-09-03 — reaching
+for them (even for a UI check) kept costing console sessions.
+`scripts/build-evoplayer.sh` still exists but is a **host compile check only**;
+it hard-errors on `--run`.
+
+> **PS-button-close EVO on the console before every redeploy.** Deploying over
+> a running instance risks a panic; stacking launches has kernel-panicked the
+> console.
+
+---
+
+## Launching, and why it needs care
+
+Deploy = `deploy-app.sh --ffpfsc` FTPs `PPSA99039.ffpfsc` to
+`/data/homebrew/`. **ShadowMount+ v1.7** test-mounts the changed image, then
+unmounts it again. It does **not** auto-launch an updated image (seen
+2026-10-01; older versions did on first registration). The user
+launches PPSA99039 from the **Games row**, or sends the launch remotely with
+`tools/evo-remote.sh launch`. See [the hardware cycle](#hardware-cycle) below.
+
+**The app slot stays resident.** Launching again does not replace the running
+instance — it adds one, and each opens videoout, an audio port, the pad and
+decoder threads. Stacking them kernel-panicked the console on 2026-08-09
+(~50 min lost). Closing frees the slot, and you must do that **before** the
+next deploy — deploying over a live EVO can panic.
+
+### Closing: prefer QUIT EVO over the PS button
+
+**Settings → System & Diagnostics → QUIT EVO** (added 2026-09-18,
+`ACT_QUIT` in `SettingsScreen.cpp`) calls `Application::requestExit()`, which
+clears `m_running` so the frame loop finishes its frame and leaves through
+`Application::shutdown()` — the only path that drains the GPU and hands back
+the scanout registration and the direct-memory pool.
+
+The PS button does not do that. It kills the process, so `run()` never returns
+and `shutdown()` never executes; the kernel reclaims a VideoOut registration
+and a 64 MB direct-memory mapping underneath a GPU that may still be executing
+a submitted command buffer. That is a panic vector, and being a race it does
+not fire every time — the console panicked on a PS-button close on 2026-09-18.
+
+Two mitigations landed with the button, both in that same commit:
+
+- `agc_wait_gpu_idle(500)` runs first in `evo_agc_runtime_shutdown()`. It waits
+  on every frame slot's fence (the protocol `frame_begin` already uses for
+  pacing) before anything is unregistered or released. Bounded at 500 ms: a
+  wedged GPU never retires its fence, and hanging there would turn a panic on
+  exit into a hang on exit. It logs `agc shutdown: slot=N idle` or
+  `STILL BUSY - releasing anyway`.
+- A `SIGTERM`/`SIGINT`/`SIGHUP` handler sets `g_evo_term_requested`, which the
+  frame loop polls, so a signalled kill also leaves through `shutdown()`. The
+  handler only stores to a `sig_atomic_t`.
+
+> **Status: hardware-verify-pending.** Whether the PS5 sends an app module a
+> `SIGTERM` before `SIGKILL` is unverified — if it does not, only the drain and
+> the QUIT button help. `requestExit()` also had no caller before QUIT EVO, so
+> the clean-exit path (including returning from `main()` and running static
+> destructors) has never executed on hardware. If QUIT hangs rather than exits,
+> that is the suspect, and the PS button still recovers it.
+>
+> To check: quit via the button, pull `evo.log`, look for the
+> `agc shutdown: slot=N` lines. Present = the orderly path ran.
+
+Two habits:
+
+- **Batch verification.** One launch that captures several screens beats one
+  launch per screen.
+- **Iterate in the container.** Building and syntax-checking cost nothing.
+  Go to hardware when there is something real to see.
+
+`curl` / `timeout` reporting a timeout (exit 28 / 124) on an `evo-remote.sh`
+call is the normal, successful outcome — the far end holds the socket.
+
+### Hardware cycle
+
+Adopted from
+[ps5-homebrew-dev-protocol](https://github.com/blackbearreloaded/ps5-homebrew-dev-protocol)
+(its `docs/RUNBOOK.md`). One case means one changed variable, one frozen
+candidate, one bounded console cycle and one classified result.
+
+```bash
+# needs elfldr :9021, ftpsrv :2121, klog :3232; the cycle builds with --usb-remote
+docker compose run --rm ps5-dev ./tools/evo-remote.sh cycle --secs 60
+docker compose run --rm ps5-dev ./tools/evo-remote.sh cycle --no-build --play /mnt/usb0/media/gta.mp4
+
+# the pieces, by hand
+./tools/evo-remote.sh quit      # soft close -> waits for parked=1 in evo_status
+./tools/evo-remote.sh close     # close controller -> waits for "runtime layers released"
+./tools/evo-remote.sh launch    # launch controller -> waits for "[GAME] started"
+```
+
+**Lifecycle evidence comes from two sources, both read by
+`tools/evo_lifecycle.py`:**
+- ShadowMount+'s `/data/shadowmount/debug.log`:
+  - `NOTIFY: installed game` / `mount.lnk created` = registered;
+  - `[GAME] started:` = launched;
+  - `[LINK] runtime layers released:` = the process is gone and the slot is
+    free.
+- EVO's `evo_status` heartbeat: `t=` advancing means running; `parked=1` is
+  written once, when the soft close parks.
+
+`deploy-app.sh` now asks ShadowMount too. "EVO ran and is not running" used to
+need `--force`, because a parked EVO and a closed one looked the same. A
+"released" after the last "started" now settles that.
+
+**The controllers** (`tools/ps5-controllers/`, vendored GPL-3.0, see the README
+there) are tiny ELF payloads sent to elfldr, with the title ID compiled in:
+- `launch.c`: `sceSystemServiceLaunchApp` for the foreground user.
+- `close.c`: kills the foreground app, only if its title is PPSA99039.
+
+**`close` kills the process, the same as a PS-button close.** The script
+refuses to send it unless `evo_status` says `parked=1` (or `--force` with no
+heartbeat to read, and never while `t=` advances). The order is always
+`quit` → parked → `close`, so a quiescent GPU is what gets killed. `launch` is
+refused while ShadowMount shows the title started-and-not-released, or while
+the heartbeat moves, so it cannot stack a launch.
+
+What `cycle` does, in order. It stops at the first anomaly and never retries:
+
+1. **Preflight.** :2121, :3232 and :9021 must answer. A dirty tree is flagged
+   `+dirty`.
+2. **Free the slot.** If it is resident: `quit`, then `close`. If there is no
+   heartbeat, the result is `no-run`.
+3. **Package.** `package-app.sh --ffpfsc --usb-remote`, then record the
+   `.ffpfsc` sha256.
+4. **Deploy.** The upload is read back and its sha256 compared before it is
+   renamed into place; a mismatch deletes it, and the result is
+   `transport-failure`. The deploy runs, then ShadowMount must log the new registration
+   within 90 s. Without it, nothing launches.
+5. **Observe.** klog starts recording first. `launch` is sent only if
+   `[GAME] started` doesn't appear within 40 s, which guards against an
+   older ShadowMount that auto-launches. v1.7 never does, so expect the
+   wait. Then `--play`, the `--secs` window, and pulling `evo.log` and
+   `evo_status`.
+6. **Close.** `quit`, then parked, then `close`, then released.
+7. **Classify** with exactly one result:
+   - `pass`;
+   - `partial-pass`: started but did not park;
+   - `failed`: never started, crash in klog, `fatal=1`, or no release;
+   - `inconclusive`: started but the heartbeat vanished;
+   - `transport-failure`: deploy or FTP broke;
+   - `no-run`: blocked before execution.
+
+The evidence goes to `output/cycles/<stamp>/`: `result.json`, `klog.log`,
+`evo.log`, `evo_status.txt`, the ShadowMount slice, `sha256.txt` and the step
+logs. One line is appended to `output/cycles/ledger.txt`:
+
+```text
+- 2026-10-01 | 8718ffa | PPSA99039 | pass: teardown | output/cycles/20261001T034700Z | -
+```
+
+Paste a proven milestone's line into the issue or
+[status.md](../evo-pro/status.md). Don't paste raw logs.
+
+Protocol rules that apply on top of ours:
+- Run cycles one at a time.
+- After any `failed`, `inconclusive` or `transport-failure`, check the console
+  before the next run.
+- After a suspected kernel panic, analyse the evidence offline and don't rerun.
+- Never touch console Settings, and never approve an update.
+
+> **Status: hw-verified 2026-10-01** (PS5 Pro, FW 12.70, ShadowMount+
+> v1.7beta2, elfldr :9021):
+> - `launch`: `[GAME] started` in 1 s, heartbeat live. The old hbldr
+>   `0x80940005` doesn't happen through elfldr.
+> - `quit`: parked in 2.7 s, `soft close: parked - GPU idle`.
+> - `close`: `runtime layers released` 1 s after the kill, services healthy.
+> - `cycle --no-build --secs 30`: `pass: teardown`.
+>
+> The `getAppStatus: LNC_ISOK::0x80940004` line both controllers print is
+> SceLncUtil chatter echoed back by elfldr, not a failure. In ShadowMount
+> v1.7, an updated image counts as registered at
+> `unmount complete: source=/data/homebrew/PPSA99039.ffpfsc`.
+
+---
+
+## Packaging: the app module
+
+### `.ffpfsc` — the only route
+
+`scripts/package-app.sh` → `scripts/deploy-app.sh` → mount + launch from the
+**Games row** with ShadowMountPlus. Builds a fake-signed **game-category app
+module** (`PPSA99039`): full `param.json`, a carried clean-room `libc.prx`,
+the whole EVO player.
+
+This is the **only context with real system access** — `sceVideodec2`
+hardware decode, `sceAgc` GPU rendering, a proper user session, the full
+sandbox. A borrowed-process payload (below) reaches none of that; the errno
+5200 decode wall and the elfldr "no graphics path" result were both just
+process-context limits. From here on, anything touching decode, GPU, or
+audio/output fidelity is tested here.
+
+```bash
+docker compose run --rm ps5-dev bash -lc '
+  ./scripts/package-app.sh --ffpfsc     # eboot.bin + param + libc, PFS-packed
+  ./scripts/deploy-app.sh --ffpfsc'     # PS5_HOST from .env, like everything else
+# then, on the console: ShadowMountPlus -> mount PPSA99039 -> launch from Games
+```
+
+| Script | What it does |
+|---|---|
+| `package-app.sh` | Compiles EVO with the native-app link tail, converts + FSELF-signs `eboot.bin`, assembles `output/app/PPSA99039/`. `--ffpfsc` also PFS-packs it to `PPSA99039.ffpfsc` (MkPFS — same format ProsperoLight ships). `--usb-remote` adds the scriptable FTP dev remote (`evo_status` + `evo_cmd`). `--probe` builds the sandbox probe instead of the player. `--breadcrumbs` (#51) also pops each diagnostic line as an on-screen notification — off by default since `/mnt/usb0/evo.log` + klog carry them all. |
+| `deploy-app.sh` | FTP-uploads the folder (or, with `--ffpfsc`, the single image) to `/data/homebrew/`. `--undeploy` removes it. `--ffpfsc --fresh` is a **fresh install**: after the running-EVO check it wipes every EVO file (`tools/wipe-evo.py` — the app, `/data/evoplayer` settings/logins/playlists/calibration, and `/mnt/usb0/evo*`), then deploys. Does **not** launch — ShadowMountPlus + the launch-safety rule are on you. |
+| `../tools/wipe-evo.py` | The EVO-only console wipe behind `--fresh`. `python3 tools/wipe-evo.py <host>` is a dry run that lists what would go; `--do` deletes. Never touches other homebrew, games or non-EVO USB files. |
+| `setup-pfs-tool.sh` | Fetches MkPFS into `.deps/` (pinned, isolated venv). Called by `--ffpfsc`; needs network on first run. |
+| `setup-native-app-deps.sh` | Bootstraps the static zlib the host converter needs. Called by `package-app.sh`. |
+
+`param.json` lives at `projects/evoplayer/sce_sys/param.json` and is validated
+on every build. The `eboot.bin` / `param.json` / `libc.prx` are byte-identical
+between the folder and the `.ffpfsc` — the image is just a different container.
+
+**Two things in the link are worth knowing about:**
+
+- **System PRXs the SDK ships no stub for** become positional
+  `DT_NEEDED` imports built from `tools/native-app/stubs/prx/*.syms` (step 6b).
+  Today: `libSceVideodec2`, `libSceAgc`, `libSceAgcDriver`, and
+  `libSceCommonDialog` (#34, so the native IME keyboard can initialise the
+  common-dialog family). A name in one of those files that no object imports —
+  or that the firmware's `.sprx` does not export — makes the loader reject the
+  whole module at launch with no log, so the script refuses to build a dead
+  import.
+- **`librmlui.a` is patched in place** (#68): step 5 compiles
+  `ui_rml/src/rmlui_patch/GeometryBackgroundBorder.cpp` — RmlUi's corner
+  tessellation with a finer `GetNumPoints()` — and swaps it over the matching
+  member of a build-local **copy** of the pacbrew archive. Upstream's `3 + R/6`
+  points make a 20 px radius a 5-segment polygon that visibly facets. See
+  `ui_rml/src/rmlui_patch/VENDORED.md`.
+
+**#36: this is also what CI and releases build now.** `.github/workflows/build.yml`
+runs `package-app.sh --ffpfsc` on every PR (job `package-app`) and verifies
+the signed container + `assets/` bundle aren't empty — a broken PFS pack or
+link tail is caught before a tag. `.github/workflows/release.yml` publishes
+`EVOPlayer-<tag>-PPSA99039.ffpfsc` as the release artifact. Neither runner
+has a console, so nothing there is
+hardware-tested — CI's job is proving the image builds and packs cleanly.
+`eboot.bin` inside `output/app/.build/eboot.elf` is the pre-sign ELF; the
+signed `eboot.bin` itself is FSELF-wrapped and reads as opaque `data` to
+`file`/`readelf` — verify it with `ps5-native-tool self --inspect` instead
+(see either workflow's "Verify" step for the exact checks).
+
+Iteration still needs a manual mount + launch per cycle (no remote
+`SceSystemServiceLaunchApp` for an unregistered title). Diagnostics come back
+two ways, both carrying the same lines: **`/mnt/usb0/evo.log`** — one
+timestamped file with the boot trace, the `pp_stage_bc` / `evo_bt` / `EVO_P8`
+breadcrumbs, the decoder notes and the per-file playback stats (pre-unjail
+lines are buffered and flushed once `/mnt/usb0` resolves) — pull it with
+`tools/evo-remote.sh log`; and **klog** live via `sceKernelDebugOutText`,
+useful before the sandbox opens. On-screen notification popups of each line
+are **off by default since #51** (just TV noise) — `package-app.sh
+--breadcrumbs` (`-DEVO_BOOT_TRACE_POPUP=1`) brings them back. USB media browse
+still needs the self-unjail (`evo_jailbreak_self`, or `tools/sandbox-unjail.sh`).
+
+**Memory lines in `evo.log`** (#94). `mem budget [<when>]` is the kernel's
+view (direct total / largest free run, flexible configured / free, EVO's own
+pool) at boot and at each software decoder open. `alloc [<when>]` is the
+malloc shim's: `live`/`peak`, `map_fail` (backing maps refused - nonzero means
+a real out-of-memory, so check it before blaming a codec), `flex_avail`, and
+`direct=`/`direct_live=`/`direct_peak=` for heap blocks served from direct
+memory. It is logged at `decode-open`, every 2 s of playback (`play` - the
+line that survives a crash) and at `stop`.
+
+**Direct-memory probe.** Put a file `/mnt/usb0/evo_dm_probe` on the stick
+whose content is a ceiling in MB (default 8192). At boot, after the GPU
+runtime and hardware decoders are up, EVO allocates direct memory 256 MB at a
+time up to that ceiling, writes and verifies every page, logs one
+`dm probe:` line per step, and releases it all (~70 ms for 8 GB). Delete the
+file to skip it.
+
+For a quick UI check on the real framebuffer, use the host renderer
+(`tools/uiview.sh` / `uiplay.sh`) — same RmlUi code and assets, no console.
+
+---
+
+## `scripts/` — build and deploy
+
+| Script | What it does |
+|---|---|
+| `common.sh` | Sourced by everything else. Strict mode, an `ERR` trap that names the failing line, logging helpers, container detection and re-exec, SDK loading, `PS5_HOST` validation, ELF validation. Not run directly. |
+| `setup-sdk.sh` | Installs the PS5 payload SDK into the image. |
+| `install-sdk-image.sh`, `install-pacbrew-image.sh` | Pull the pinned SDK / pacbrew package sets. |
+| `build.sh` | Builds the small sample projects under `projects/`. |
+| `build-ffmpeg.sh` | Builds FFmpeg for the console. Slow, cached in a Linux volume. |
+| `build-prosperoplayer.sh` | Builds the upstream baseline fork. |
+| `build-evoplayer.sh` | **Host compile check only.** Builds `output/elf/EVOPlayer.elf` to keep the non-app-module code path green (#31/#36/modularisation). Hard-errors on `--run`; cannot deploy. `--stage N` picks a 4K product stage. |
+| `package-app.sh` / `deploy-app.sh` | **The one deploy path.** Build + deploy EVO as the `PPSA99039` app module — see [above](#ffpfsc--the-only-route). |
+| `package-pkg.sh` | Produces a distributable PKG. |
+| `gen-compile-commands.sh` | Regenerates `compile_commands.json` for clangd. |
+| `shell.sh` | Drops you into a container shell. |
+
+### Build switches
+
+Passed through `EXTRA_CFLAGS`, empty in shipping builds:
+
+| Flag | Effect |
+|---|---|
+| `-DEVO_AUTOSHOT=N` | Capture the framebuffer to `/mnt/usb0/` N seconds after launch |
+| `-DEVO_START_SCREEN=n` | Boot straight into a screen — `0` launch, `1` browser, `10` settings, `11` profile |
+| `-DEVO_PAD_DEBUG=1` | Print the raw pad mask on every press |
+
+#### The render path
+
+```bash
+./scripts/package-app.sh --ffpfsc          # bare-metal sceAgc, always
+```
+
+| | how |
+|---|---|
+| UI rendering | `EvoRenderInterfaceAGC`, hand-built `sceAgc` DCBs |
+| Video present | AGC video pipelines |
+| Shaders | `.pipe` -> amdllpc (see below) |
+| Render size | the panel's own, from `sceVideoOutGetResolutionStatus` |
+
+`--agc` is still accepted so old muscle memory and scripts keep working, but it
+selects what you get anyway. `--gl`, `--no-gl`, `--gl-smoke` and
+`--gl-hdr-probe` were removed along with the `ps5-opengl` submodule and now
+fail with that explanation.
+
+### Shader pipelines - `--agc` builds
+
+AGC shaders live in `projects/evoplayer/shaders/agc/*.pipe` and are compiled by
+**amdllpc**, AMD's open-source LLPC compiler, in a *separate* Docker image.
+
+```bash
+# one-time: build the compiler image (LLVM-scale, ~1h, cached afterwards)
+docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml build ps5-dev
+
+# recompile the shaders after editing any .pipe
+docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml   run --rm ps5-dev python3 tools/build_agc_pipes.py
+```
+
+Things that will otherwise cost a debugging session:
+
+- **`package-app.sh` does NOT rebuild shaders.** Edit a `.pipe`, run a normal
+  build, and it silently ships the previously generated `*_pipe.h`. Run
+  `build_agc_pipes.py` first, in the amdllpc image.
+- **The amdllpc image is a different image** from the normal `ps5-dev` one. A
+  plain `docker compose run` has no `amdllpc` and no PyYAML; the script says so
+  rather than half-working.
+- **Never hand-edit `*_pipe.h`.** Generated: ISA blobs plus register tables
+  derived from the compiler's PAL metadata.
+- **`gen_video_pipes.py` owns the four video `.pipe` files.** Edit the generator,
+  not its output - they share one vertex stage and it rewrites all four.
+
+Why this toolchain exists and what the generated values mean:
+[agc-bare-metal-ui.md](../evo-pro/agc-bare-metal-ui.md).
+
+### Seeing payload `printf`
+
+Payload stdout is **not** in klog — klog is the kernel log. It comes back as
+the body of the `hbldr` request when `pipe=1` is set, so capture that response
+instead of discarding it:
+
+```bash
+curl -sS --max-time 20 --get \
+  --data-urlencode "path=/data/homebrew/EVOPlayer/eboot.elf" \
+  --data-urlencode "pipe=1" "http://$PS5_HOST:8080/hbldr"
+```
+
+`curl` will report a timeout when the window expires — that is expected, the
+payload is still running, and everything printed up to then is on stdout.
+
+`build-evoplayer.sh` deletes the ELF before every build on purpose. Upstream's
+make rule tracks `main.c` and the `pp/` sources but not `CFLAGS` and not
+headers, so changing a `-D` flag left the previous binary in place and reported
+"up to date" — which cost a debugging cycle when a flag change was installed,
+launched, and reasoned about against a binary that had never been rebuilt.
+
+---
+
+## Navigating by text: `evo-remote.sh ui` and `key` (#115)
+
+A `--usb-remote` build writes `/mnt/usb0/evo_ui.json` whenever the screen,
+the focused element, a modal or a toast changes. The DOM is sampled at 10 Hz
+and the file is written only when it differs, so an idle UI writes nothing.
+Release builds compile all of it out.
+
+```bash
+./tools/evo-remote.sh key down down cross     # one line per press:
+# down     [focus] #rec-tile-0 "Best of the Best Recent File" (item 1/6, launch) on MainMenu(0)  (seq 3)
+./tools/evo-remote.sh ui            # the whole JSON + that line
+./tools/evo-remote.sh ui --line     # just the line
+./tools/evo-remote.sh key --no-wait l3   # old behaviour: send, don't read back
+```
+
+`key` sends each press, waits for `seq` to move (up to `EVO_KEY_WAIT`
+seconds, default 2.5), and prints where focus came to rest. `(unchanged)`
+means the press moved nothing: the end of a list, or a key the screen ignores.
+
+What is in the JSON (`ui`):
+
+- `screen`: the `evo::ScreenId` number and name.
+- `docs`: every visible RmlUi document (`launch`, `navbar`, `dialog`, a
+  provider's own `.rml`, ...).
+- `focused`: `id`, `tag`, `class`, `text`, `doc`, `index`/`total` in its list,
+  `rect` (UI context pixels: 3840x2160 on a 4K output), and `focusable`, the
+  other items of the same list (same tag and same first class) with their
+  text. Icon-only items get their icon name as text,
+  e.g. `[icon_home]`.
+- `also_highlighted`: other highlighted elements, such as a remembered
+  selection in a pane that does not have the cursor.
+- `modal`: `{kind: keyboard|dialog, text}` or `null`. `toast`: its text or
+  `null`.
+- `native_player` (Player screen only): `osd_visible`, `paused`,
+  `active_overlay` (`scrub` / `stats` / `null`).
+
+How focus is found (`ui_rml/src/evo_rmlui_devstate.cpp`): RmlUi's own focus
+(provider screens), or an element carrying a `focused`, `*-focused` or
+`*-cursor` class (every native screen). The keyboard wins over a dialog, a
+dialog over the nav rail, the rail over the screen. **A new screen that
+highlights with inline properties only is invisible to this**: give the
+highlighted element a `*-focused` class, even with no RCSS rule (see
+`hero-focused` in `UpdateLaunchState`).
+
+Use `ui` / `key` for navigation and test automation. Keep `key l3` +
+`shot.sh grab` for visual checks: layout, colour, rendering.
+
+---
+
+## `tools/shot.sh` — screenshots, and measuring them
+
+Captures are written by the player itself: a build with `-DEVO_AUTOSHOT=N`
+writes one N seconds after launch, and **L3 or R3 in the menus** writes one on
+demand. They land on the USB stick as `evo_shot_NNN.bmp`.
+
+```bash
+./tools/shot.sh grab            # newest capture -> output/screenshots/latest.png
+./tools/shot.sh grab --full     # full resolution instead of half
+./tools/shot.sh list            # what is on the stick, and how much space
+./tools/shot.sh clean           # what is there, and how to remove it
+```
+
+Each BMP is an uncompressed 1920×1080 framebuffer — about **6 MB**, and the
+player never cleans them up, so the stick fills over a long session.
+
+`clean` cannot delete them for you: the console's web server serves `/fs`
+read-only and implements no `DELETE` (its own `apiClient.js` only ever GETs).
+So `clean` lists what is there and points at the two routes that do work — the
+terminal built into `http://$PS5_HOST:8080/`, or pulling the stick. Local
+copies under `output/screenshots` are ordinary files.
+
+### Measuring, not squinting
+
+This is the part worth knowing about. The capture is raw framebuffer, so it can
+be interrogated numerically, and several UI questions were only settled that
+way. "Are these icon edges aliased, or is the blitter wrong?" looks identical
+on screen either way; the coverage ramp in the pixels answers it outright.
+
+All of these default to the last capture you grabbed, so you `grab` once and
+then ask as many questions as you need.
+
+```bash
+# colour at one framebuffer coordinate (1080p space - the same numbers
+# that appear in ui/include/evo_metrics.h)
+./tools/shot.sh probe 180 214
+
+# summary of a region: mean, distinct colour count, top colours by area
+./tools/shot.sh probe 152 222 1704 92
+
+# pixel runs along a line, repeats collapsed. An antialiased edge shows a
+# ramp; an aliased one steps from background to full intensity in one pixel
+./tools/shot.sh scan row 260
+./tools/shot.sh scan col 400 200 320
+
+# cut one card or icon out at full resolution
+./tools/shot.sh crop 1228 222 560 315
+
+# did that change actually do anything?
+./tools/shot.sh diff evo_shot_007.bmp evo_shot_008.bmp
+```
+
+`tools/shot.py` holds the BMP/PNG code and can be called directly if you want
+to script something; `tools/shot.sh` is the front end and handles fetching.
+
+`tools/fetch_shot.sh` still works — it is a shim onto `shot.sh grab`.
+
+---
+
+## `tools/klog.sh` — the console log, kept
+
+The console's kernel log is the only channel that shows a payload dying before
+it can draw anything. It needs **`ps5-payload-klogsrv` running on the console**;
+the log then streams on port 3232.
+
+The documented approach used to be `nc $PS5_HOST 3232`, which has two problems:
+nothing is recorded, so the log is only useful if you happen to be watching at
+the moment something goes wrong (which, for a crash on launch, you are not);
+and klogsrv drops the connection whenever the payload restarts, so a bare `nc`
+exits exactly when an investigation is starting.
+
+```bash
+./tools/klog.sh                 # follow, printing and recording
+./tools/klog.sh --quiet         # record only
+./tools/klog.sh --grep evo      # follow, filtered
+./tools/klog.sh --once          # drain what is buffered and exit
+./tools/klog.sh --tail 200      # last 200 recorded lines, offline
+./tools/klog.sh --sessions      # what has been recorded
+```
+
+Every line is timestamped host-side (klog carries no clock of its own, so
+without this there is no way to line a message up against a build or a
+screenshot) and written to two places:
+
+- `output/logs/klog/klog-<UTC>.log` — one file per capture session
+- `output/logs/klog/klog-all.log` — **append-only, never rotated or
+  truncated.** Nothing is ever lost, across any number of sessions.
+
+A dropped connection reconnects instead of ending the capture, and the
+reconnect is logged inline so a payload restart is visible in the record. After
+a successful connection closes the retry is immediate — a restart is the case
+where the *next* few lines are the ones that matter.
+
+---
+
+## `tools/gen_icons.py` — icon and controller-glyph generation
+
+```bash
+python3 tools/gen_icons.py     # writes assets/evo_icons.h + a contact sheet
+```
+
+Icons are described as vector shapes and rasterised from signed distance
+fields, so edges carry analytic coverage at any size.
+
+**To add an icon:** append to `ICONS` as `(macro_prefix, shape_fn, size)`, add
+its name to `ICON_TABLE`, and add a named constant in `ui/include/evo_draw.h`
+(such as `EVO_IC_LOGO`, `EVO_IC_HOME`, or `EVO_IC_EMBY`).
+There is no `switch` to update any more — the generator emits
+`EVO_ICON_TABLE`, and both the player and `tools/uiview.c` index it. That
+replaced three hand-written switches, one of which had already drifted and
+drew nothing for two icons.
+
+**It also generates the font punctuation.** The UI atlas has 69 glyphs and no
+comma, apostrophe, parenthesis or question mark, and it cannot be regenerated
+— there is no generator for it in the tree. So `PUNCT` here describes the
+missing marks in cap-height units, and the script emits a second atlas
+(`assets/evo_font_punct.h`), the alphabet on its own for the UI layer
+(`ui/include/evo_font_charset.h`), and a contact sheet at
+`output/screenshots/punct_preview.png`. Look at the sheet after changing a
+glyph; several of them read wrong on the first attempt and only the picture
+showed it.
+
+Advances are measured from the rasterised ink, not declared, so a shape change
+cannot leave the spacing behind.
+
+---
+
+## `tools/measure_font.py` — the font's real metrics
+
+```bash
+python3 tools/measure_font.py
+```
+
+Reads baseline, cap height, x-height, descender and stroke weight straight out
+of the atlas ink, per face, by walking glyphs whose shape is known (`H`, `x`,
+`p`, `.`, `:`, `-`).
+
+Generated punctuation has to sit on the same baseline as the letters, and the
+atlas carries no such metadata — guessing puts a comma floating mid-line. The
+numbers this prints are pasted into `gen_icons.py` as `FACE_METRICS`. Re-run it
+rather than trusting them if the atlas is ever replaced.
+
+They are monochrome by design: the UI tints them with the theme accent at draw
+time. The controller prompts were originally two-tone bitmaps (103 distinct
+RGB values), which is why they stayed cyan under every theme until they were
+regenerated as single-hue glyphs.
+
+---
+
+## `tools/prof_rmlui.sh` — where a UI frame's time goes, on the host
+
+Builds `tools/prof_rmlui.cpp` against the real RmlUi sources with
+`-DEVO_RML_PROFILE` and runs three representative screens (LAUNCH, SETTINGS,
+BROWSER) in two regimes — IDLE (identical state pushed every frame) and NAV
+(cursor moves every frame) — then a composite/copy microbench.
+
+```bash
+./tools/prof_rmlui.sh     # container-aware, like the rest of tools/
+```
+
+**Read the IDLE number with care — it is mostly harness.** On the host,
+`RenderCachedScreen()` finishes with an unconditional ~8.3 MB memcpy of the
+cached surface into the caller's framebuffer, and the composite bench in the
+same run clocks a 1080p memcpy at ~0.8 ms. So IDLE reads ~1.2 ms whatever the
+rest of the frame costs. The console never pays it: under `EVO_AGC_DEVICE`,
+`RenderCachedScreen()` returns early on an inactive frame and does
+`(void)framebuffer`.
+
+A printed `accounted 0.00 ms / wall 1.19 ms (0%)` therefore means "none of this
+is inside `Rml::Context`", **not** "1.19 ms is unexplained work you can go and
+delete". Reading it the second way cost a session in 2026-09-18: it led to a
+bridge rewrite that measured as no improvement at all, because the thing being
+optimised was never what the number was showing.
+
+The NAV figures (250–315 ms/frame) are the CPU rasteriser, which the shipping
+`.ffpfsc` does not use — it renders through `evo_rmlui_render_agc.cpp`. Treat
+them as a relative signal between screens, never as device frame times.
+
+**`bridge_bench()` is the part that transfers to hardware.** It times the
+`evo_rmlui_update_*()` calls alone, with unchanging params, and no render —
+which is exactly what the console does on an idle frame to decide whether
+anything changed. Measured 2026-09-18: 0.0006–0.0032 ms/frame. That is the
+budget for any change to the bridge's state structs, and it is small enough
+that the answer is almost always "leave it alone".
+
+The `xNN` columns are geometry calls per frame, not multipliers — useful for
+sizing anything that runs per draw (LAUNCH ~172, BROWSER ~156).
+
+---
+
+## `tools/uiview.sh` — the UI, rendered on the host
+
+**Look at the UI without a console.** This is not a mock-up: it links the real
+drawing code — `evo_ui`'s SDF primitives, `evo_chrome`, `evo_widgets`,
+`evo_screens` — against the real font atlas and the real generated icons, and
+paints a 1920×1080 buffer exactly as the player does. What comes out is what
+the console draws, modulo the tile swizzle, which changes where pixels live in
+memory and not what they look like.
+
+```bash
+./tools/uiview.sh --all                  # every screen -> output/uiview/
+./tools/uiview.sh browse --sel 3
+./tools/uiview.sh browse --rail          # rail focused (the expanded overlay)
+./tools/uiview.sh launch --row 2         # cursor on the library shelf
+./tools/uiview.sh favorites --empty      # the empty state
+./tools/uiview.sh settings --theme EMBER
+```
+
+It renders BMP and converts through `tools/shot.py`, the same path console
+captures take, so a host render and a console capture are directly comparable
+with `shot.py diff`.
+
+Themes come from the four built-ins: `EVO_THEME_DIR` is pointed at a path that
+does not exist on the host, so a render never depends on what happens to be on
+someone's USB stick.
+
+It earns its keep immediately — its first run surfaced two real defects that
+had shipped to hardware unnoticed:
+
+- `evo_ui_vgrad` **replaces** rather than blends. Using it for a scrim wrote
+  transparency straight into the framebuffer, and since scanout ignores alpha
+  the hero's fade rendered as a hard black slab. Fixed by adding
+  `evo_ui_vgrad_over()`.
+- The expanded rail was ~240/255 opaque, because card surfaces carry alpha
+  (MIDNIGHT's `surface` is 235) and that alpha propagated into the panel fill.
+  The page title behind ghosted through it.
+
+Both are the kind of thing you notice instantly in a still and never quite
+pin down at ten feet.
+
+### The regression pass — bugs that only exist in sequence
+
+Rendering each screen once misses anything that leaks *between* screens, and
+two such bugs shipped: rounded posters that came back square after you played
+something, and the last photo you opened showing instead of the film. Both are
+state left behind by an earlier screen, so the harness ends with a deliberate
+sequence (`render_regression_screens()` in `tools/uiview_playback_rml.cpp`):
+
+| Shot | What it proves |
+|---|---|
+| `rml_launch_recent_first` / `rml_launch_recent_return` | the home screen either side of a detour through the resume dialog, the image viewer and the player. **Must be pixel-identical** — `python3 tools/shot.py diff` on the two BMPs. A non-zero diff at a tile corner is the clip mask carrying a previous screen's coverage. |
+| `rml_playback_after_image` | the playback OSD entered straight from the image viewer. The "film" is a flat green fill; any of the photo showing through means a screen document was left visible under the OSD's transparent background. |
+
+Add to it whenever a bug turns out to be one screen poisoning the next — a
+still of each screen on its own will never catch that class.
+
+### Walking through it: `tools/uiplay.sh`
+
+`uiview` gives stills. `uiplay` gives something you can drive, in a browser,
+on any machine:
+
+```bash
+./tools/uiplay.sh                # then open output/uiplay/index.html
+./tools/uiplay.sh --theme EMBER
+```
+
+Arrow keys move, Enter selects, Esc goes back, Left opens the navigation rail
+— the same model the console uses. `E` toggles the empty states, `M` steps
+through the modal screens, `F` goes fullscreen and `H` hides the page chrome,
+because the frame is the point and a 1920×1080 still deserves the whole
+monitor.
+
+`M` exists because the resume prompt, the playback-finished prompt and media
+info are opened *by the player*, so there is no route into them from the
+menus and the walkthrough needs its own way in.
+
+**Every screen the UI layer draws is covered.** The one exception is the
+player OSD, which overlays live video and has not been migrated — see
+[ui-handoff.md](../ui/ui-handoff.md).
+
+There is no emscripten, no mingw and no host SDL2 in the container, so a
+windowed binary is not buildable from here. It does not need to be: this repo
+owns both the renderer and the navigation model, so every reachable cursor
+position can be rendered ahead of time — 107 frames at full 1920×1080, about
+15 MB — and stepped through with a JavaScript copy of `evo_grid` /
+`evo_focus` / `evo_nav`. If that copy and the C ever disagree, the C is right
+and the page is the bug.
+
+Frames are full resolution rather than half on purpose: these get viewed on a
+desktop monitor that is often wider than 1920, and the hairlines, 1 px borders
+and small type — the things actually worth inspecting — turn to mush when a
+half-size frame is scaled up.
+
+It is **not** live data, animation or the player's timing. It shows layout and
+navigation, which is exactly what cannot be checked without a console.
+
+It found the hero's action chip sizing its width for a 48px controller glyph
+placed at a 62px text offset, so the ✕ and the label overlapped whenever the
+hero was not selected — visible only in the unselected state, which no
+hardware screenshot had happened to capture.
+
+---
+
+## `tools/evo-dash.py` — live health dashboard on the PC
+
+```bash
+python tools/evo-dash.py            # then open http://localhost:8790
+```
+
+Runs on the HOST (plain Python 3, no Docker). It polls EVO's `GET /stats`
+(port 9780, `src/evo_stats.c`) once a second and tails `/raw`, then shows in
+plain words whether playback is OK: memory (the 448 MB flexible pool, the one
+that runs out), seconds of video loaded ahead, download speed against what the
+video needs, and a "What happened" list (buffering, connection lost / back,
+out-of-memory). The raw log is behind a toggle. Every sample is also written to
+`output/dash/<date>.jsonl`. Console address: `--host`, else `PS5_HOST`.
+
+`curl http://<ps5>:9780/stats` gives the same snapshot as JSON.
+
+---
+
+## `tools/provider-server.sh` — serving a provider UI bundle (#90)
+
+A provider brings its own UI: `.rml`/`.rcss`/fonts/images fetched over HTTP at
+runtime and cached under `/data/evoplayer/providers/<id>/`. This serves those
+bundles, plus a test M3U playlist and an XMLTV file, to the console.
+
+```bash
+./tools/provider-server.sh [--port 8099] [--host <ip>]
+```
+
+**It runs on the host, not in the dev container, and refuses to start if it
+detects `/.dockerenv`.** Every other script here re-execs itself through
+`docker compose`; this one cannot, because the thing that has to be reachable is
+the listening socket, and per
+[../hardware/networking.md](../hardware/networking.md) the PS5 cannot reach into
+the container on Windows bridge networking. A server started inside would be
+invisible to the console even though `curl` from inside works — which looks
+exactly like a broken bundle.
+
+What it does:
+
+- regenerates each bundle's `manifest.json` (`tools/gen_provider_manifest.py`)
+  and stages `assets/providers/*` under `/ui/<id>/`
+- serves a test playlist at `/media/iptv.m3u` — six channels, three
+  `group-title` groups, and one deliberately dead entry, because "pull the
+  network mid-stream → a clean error, not a hang" needs something to fail
+  against. Drop a real playlist at `tools/testdata/iptv.m3u` and it wins.
+- generates `/media/epg.xml` with now/next windows relative to start time, so
+  the EPG chips are always populated
+- prints the LAN URL and the `iptv.conf` to paste over FTP into
+  `/data/evoplayer/`
+
+Regenerating the manifest on every start is the point: it carries a sha256 per
+file and a `version` EVO compares against its cache, so serving a stale manifest
+means an edited `.rcss` is either rejected for a hash mismatch or silently not
+picked up — and both look like the edit not working.
+
+A Windows Firewall prompt on the first run is normal and has to be allowed for
+Private networks. Check reachability from another machine before blaming the
+console:
+
+```bash
+curl -s http://<host>:8099/ui/iptv/manifest.json | head -5
+```
+
+### `tools/gen_provider_manifest.py`
+
+```bash
+python3 tools/gen_provider_manifest.py assets/providers/iptv
+```
+
+Rebuilds a bundle's `manifest.json` from whatever is in the directory: every
+file's byte count and sha256, a fresh UTC `version`, and the non-derivable
+fields (`id`, `name`, `entry`, `data_model`, `api_version`) carried over from
+the existing manifest. It also enforces EVO's own limits at authoring time — 64
+files, 2 MiB per file, 8 MiB total, and an allow-list of extensions — so an
+oversized or code-carrying bundle is a message here rather than a fallback skin
+on the console.
+
+The full format, the binding contract and the measured RCSS rules a bundle has
+to follow are in
+[../addons/provider-architecture.md](../addons/provider-architecture.md).
+
+---
+
+## `tools/evo-remote.sh sweep` — the codec sweep, measured (#8)
+
+The 29-file test set, played end to end with numbers attached instead of
+checkmarks. One deployed `--usb-remote` build, launched once, then hands-off:
+
+```bash
+docker compose run --rm ps5-dev ./tools/evo-remote.sh sweep
+docker compose run --rm ps5-dev ./tools/evo-remote.sh sweep --dir /mnt/usb0/clips --secs 45
+docker compose run --rm ps5-dev ./tools/evo-remote.sh sweep --max 3      # smoke it first
+```
+
+`sweep` lists the directory over FTP, plays each clip for a 30 s window
+(`--secs`), and moves on when the window is reached, the clip ends, or it
+stalls. EVO does the measuring: each file writes one `sweep v=1 …` line to
+`/mnt/usb0/evo.log` **when its decoder closes**, which is why the runner's next
+`play` (and a trailing `stop`) matter — they are what flush the previous row.
+Then it pulls the log and renders `output/logs/sweep.md`.
+
+Two supporting pieces:
+
+- `tools/sweep_run.py` — the driver. Every FTP call is timeout-bounded; a clip
+  that never starts is recorded and skipped rather than hanging the run.
+- `tools/sweep_report.py` — log → markdown table. Host-only, so a table can be
+  re-rendered from any log after the fact, and `--colour-ref <earlier evo.log>`
+  turns the colour column into match/differs against a baseline run.
+
+```bash
+python3 tools/sweep_report.py output/logs/evo.log -o output/logs/sweep.md
+docker compose run --rm ps5-dev ./tools/evo-remote.sh report   # same, in-container
+```
+
+What each column means, and why a colour signature is in there at all:
+[`validation.md`](validation.md#codec-sweep--decode-speed-drops-and-colour-8).
+
+The instrumentation itself is `media/src/evo_sweep.c` plus the decode timers in
+the `evo_vdec` seam — it is compiled into every build, not just `--usb-remote`,
+so the same per-file line is in `evo.log` after any ordinary playback session.
+
+---
+
+## `tools/subsync_host.sh` — subtitle auto-sync on the host (#102)
+
+```bash
+./tools/subsync_host.sh                                  # synthetic self-test
+./tools/subsync_host.sh <media> <srt> [shift_s [scale]]  # a real clip
+./tools/subsync_host.sh <media> --stream <n>             # its embedded text track n
+```
+
+Compiles `media/src/evo_subsync.c`, the same file the app module builds, into
+`tools/subsync_host.c` and links it against a host FFmpeg. The dev image has no
+FFmpeg development libraries, so the first run builds a small static one from
+the same 7.1.1 source (audio decoders and the common demuxers only) into
+`output/host-ffmpeg/`. Later runs reuse it.
+
+With no arguments the harness writes a 30-minute synthetic film to
+`output/subsync-host/` and runs these cases against it: in sync, shifted
++3.7 s and −42.25 s, 25->23.976 fps with and without an offset, and
+24->23.976 fps. It also runs one SRT taken from a different "film", which has
+to come back low-confidence. Then it muxes the same film into MKVs with the
+cues as an embedded SubRip track (in sync, shifted +3.7 s and -12.3 s, and
+another film's track) to test the embedded path, which corrects the offset only. It prints PASS/FAIL per case and exits non-zero on
+any failure. With a real clip and a known-good SRT, it rewrites the cues to
+`t*scale + shift` and checks that the fix it reports is `delay = -shift` at
+that scale. Media paths are relative to the repo root.
+
+The acceptance thresholds in `evo_subsync.c` (`SS_MIN_Z` 4.0, `SS_MIN_SHARP`
+0.35, two windows agreeing) are calibrated on real audio, not only on the
+synthetic film. Tears of Steel (`Demos/TearsOfSteel.mkv`) was tested with its
+own English and Russian tracks, with the English track shifted, rescaled and
+embedded-and-shifted, and with two wrong SRTs. Right answers scored z 5.1–6.1
+and sharpness 0.40–1.6. Wrong ones scored z ≤ 2.5 and sharpness ≤ 0.20, and
+never had two windows agreeing. The synthetic audio alone was misleading. It let
+per-window XNOR scoring pass, but that scoring picked a false 24→23.976 ratio on
+the real film. That is why scoring is now covariance summed across windows, and
+why a ratio is only tried when it moves the cues ≥ 1 s over the analysed span.
+
+The console test set is in `/mnt/usb0/media/Test/Subsync/`: `ToS_srt_shift3.7`,
+`ToS_srt_25fps` (plus 1.8 s), `ToS_srt_wrong` (time-reversed) and
+`ToS_emb_shift5.2` (embedded track). `Demos/tearsofsteel_4k.srt` is there for
+the 4K dropped-frames check.
+
+On the console, the same analysis writes `subsync:` lines to `evo.log`: the
+stream, each window's speech %, the offset and confidence for each scale, and
+the final offset, ratio, confidence and elapsed time.
+
+---
+
+## `tools/dualsub_host.sh` — dual-subtitle engine on the host (#110)
+
+```bash
+./tools/dualsub_host.sh              # address + undefined-behaviour sanitizers
+SAN=thread ./tools/dualsub_host.sh   # the race detector (see the caveat below)
+./tools/dualsub_host.sh -v           # print the engine's toasts and log
+```
+
+Compiles `media/src/evo_subtitle.c`, the file the app module builds, into
+`tools/dualsub_host.c` and links it against the host FFmpeg that
+`tools/subsync_host.sh` builds (run that once first). It muxes an MKV with three
+embedded SubRip tracks (`eng`, `spa`, `fra`, cues at different times) plus a
+sidecar `.srt`, then drives the engine the way the app does: `feed_all()` does
+the demux thread's job of handing each packet to `prospero_embedded_subtitle_
+decode_packet`, and the test calls the same selection functions the picker
+calls.
+
+It checks that:
+- the secondary track decodes into its own ring, reads independently of the
+  primary, and has its own delay (the primary's is untouched)
+- one source is never both tracks, in either direction, and a refused select
+  leaves the current secondary alone
+- what was chosen survives a reopen of the same file and is forgotten for a
+  different one
+- a seek empties both rings but keeps the tracks
+- the external SRT works as either track, never both
+- one thread feeding packets while another switches, clears and reads the
+  tracks does not crash (4000 iterations)
+
+**Thread sanitizer.** `SAN=thread` needs the kernel's `vm.mmap_rnd_bits` at 28
+or lower. A stock Docker Desktop VM has 32, so the binary dies with a SEGV
+before `main()`, and the container cannot change it (`setarch -R` is refused).
+Lower it on the VM (`sysctl -w vm.mmap_rnd_bits=28`) or run the script on a
+Linux host. The default sanitizers still catch a decoder freed under a decode
+in flight, which is what the two-lock design (state, then ring) exists to
+prevent, but they cannot report a data race that does not corrupt memory.
+
+---
+
+## `tools/dns_host.sh` — name resolution on the host (#91)
+
+```bash
+./tools/dns_host.sh
+```
+
+Compiles `tools/native-app/stubs/evo_dns.c`, the file the app module links, into
+`tools/dns_host.c` against a **mock `libSceNet`**, under the address and
+undefined-behaviour sanitizers. The mock can answer, refuse, or fail to create a
+pool or a resolver, and counts every call. It checks that:
+
+- a real lookup goes to the console resolver, and an IPv4 literal, `localhost`
+  or a cached name (any case) does not
+- every address comes back as a chain in the resolver's order (a duplicate is
+  dropped, an IPv6 record is skipped, ten is the most), and the cache holds all
+  of them
+- the pool and the resolver are released on every path, including failure
+- `sceNetInit` runs once, and only after the first pool fails to create
+- "no answer" (`EAI_NONAME`) and "no resolver to ask" (`EAI_AGAIN`) are told
+  apart, a failure is not cached, and the resolver recovers when it comes back
+- a name the network's DNS blocks is not found. DNS filtering answers a blocked
+  name with `0.0.0.0` *as a success*; that is skipped (a blocked record beside a
+  real one is dropped, the real one kept), an IPv6-only name has no IPv4
+  address, and neither is cached nor switches the multi-record call off. The log
+  says why (`no usable IPv4 address (blocked by the network's DNS, or IPv6
+  only)`). This came from the console: `play-lh.googleusercontent.com` answered
+  `0.0.0.0`, which the first version read as a broken layout
+- bad arguments (empty, bracket-only, over-long, `AI_NUMERICHOST`, IPv6) are
+  refused without reaching the resolver
+- the log line names the host and the address, and says the console DNS answered
+- eight threads looking names up at once do not leak or miscount
+
+Before it builds, the script also scans the shipped sources and fails if
+`evo_dns.c` contains an IP literal, if any trace of the old hand-rolled client
+(`kDnsServers`, `dns_query_server`, `s_dns_txid`, `/etc/resolv.conf`, the fixed
+transaction id) is left in `tools/native-app/stubs/` or `addons/src/`, or if
+`getaddrinfo` is defined in more than one file.
+
+The multi-record call is also run badly, each way in its own process because the
+module remembers for the rest of a run that it is unusable: it errors where the
+single lookup works (`multifail`), it returns a layout that is not the
+documented one (`garbage`), it writes past the struct (`overrun`), and the
+`/mnt/usb0/evo_dns_single` kill switch (`killswitch`, which is not sticky). Each
+must fall back to the single address, log why, and stop trying the call.
+
+**On the console** (hw-verify pending) a passing run looks like this in
+`/mnt/usb0/evo.log`, one line per name that was not already cached:
+
+```
+dns: raw.githubusercontent.com -> 185.199.109.133, 185.199.111.133, 185.199.108.133, 185.199.110.133  (console DNS, 4 addresses, 41 ms)
+```
+
+`1 address` instead of several means the multi-record call fell back; look for
+`multi-record lookup ... single address from here on` just above it.
+
+Check that with the console's DNS set to something non-default (the lookup must
+follow it), and that an unresolvable name fails quickly with
+`dns: <name>: no answer  (rc 0x..., N ms)`. A line reading `console resolver
+unavailable` means `sceNetPoolCreate` failed even after `sceNetInit` - the
+`rc` is the raw error.
+
+---
+
+## `tools/streamopts_host.sh` — network open options on the host
+
+```bash
+./tools/streamopts_host.sh
+```
+
+Links `media/src/evo_stream_io.c`, the file the app module compiles, against the
+host FFmpeg that `tools/subsync_host.sh` builds, and checks the policy instead
+of the network: which URLs count as an HLS/DASH playlist (`.m3u8`, `.mpd`,
+`.ism/`, any case, query string included), and which FFmpeg options a network
+open gets.
+
+The case behind it (hardware, 2026-09-30, from `evo.log`): `reconnect_at_eof`
+was set for every network URL. For a raw live stream that is right, an EOF is a
+dropped connection. For an HLS playlist it is the end of a small file, and the
+http layer "reconnects" - a full request and TLS handshake - again and again
+with a growing delay, on every playlist the hls demuxer reads (it passes these
+options to all of them). A channel took 10.8 s and 21.4 s to open. The test
+pins that a playlist URL gets no `reconnect_at_eof`, a raw stream keeps it, and
+both get the bounded retries (`reconnect_max_retries` 3,
+`reconnect_delay_total_max` 6). A raw network stream is also bounded by its own
+12 s open deadline (a playlist and a local file keep 20 s, since a playlist open
+loads the master, a variant and the first segment), which catches what the retry
+limits cannot: a server that answers every reconnect with the same few bytes.
+
+It also pins `extension_picky=0`. `allowed_extensions=ALL` clears only the first of
+two gates in `hls.c`'s `test_segment()`; the second compares the URL's extension
+with the detected format, and an extensionless segment URL (Akamai's
+`/v1/segment/<token>/3/186971110`) has none, so a plainly MPEG-TS segment was
+refused with `detected format mpegts extension none mismatches allowed extensions`
+and the open failed with `AVERROR_INVALIDDATA`.
+
+---
+
+## `tools/hls_host.sh` — the HLS master-playlist parser on the host
+
+```bash
+./tools/hls_host.sh
+```
+
+Compiles `addons/src/evo_hls_variants.c`, the file the app module builds, against
+`tools/hls_host.c` under the address and undefined-behaviour sanitizers. It needs
+no FFmpeg: the parser and the relative-URL join are pure and the fetch runs
+against a stub of `evo_net`. It feeds the parser playlists shaped like the ones
+IPTV channels serve and checks that:
+
+- relative variant URLs resolve against the master (`../`, `./`, `/abs`,
+  `//host`, a query, a base with its own query and fragment) and an absolute one
+  is kept
+- variants come back best first, with resolution, bitrate and the codecs read
+  from a `CODECS` list that has a comma inside its quotes; `AVERAGE-BANDWIDTH`
+  never overrides `BANDWIDTH`
+- `#EXT-X-MEDIA`, `#EXT-X-I-FRAME-STREAM-INF`, comments and blank lines are not
+  variants, CRLF files parse, a last URI with no newline is read, and a
+  `#EXT-X-STREAM-INF` with no URI after it (a truncated download) is dropped
+- a media playlist, an empty body and an HTML error page have nothing to choose
+- duplicates collapse, and eight variants are cut to the six best
+- the fetch delivers exactly once for a good master, an HTTP 403, a network
+  failure and a media playlist, and never fires for a request that could not be
+  queued
+
+---
+
+## `tools/netconnect_host.sh` — evo_net's bounded connect on the host
+
+```bash
+./tools/netconnect_host.sh
+```
+
+Compiles `addons/src/evo_net.c`, the file the app module builds (with
+`-DNO_OPENSSL=1`, since nothing here speaks TLS), against
+`tools/netconnect_host.c` under the address and undefined-behaviour sanitizers.
+It reproduces a host with one dead address: a listening socket whose accept queue
+is full, so the kernel drops further SYNs and `connect()` stays in `SYN_SENT`,
+which is the same thing on the wire as a black-holed CDN address. Each listener
+has its own loopback address (`127.0.0.2` …) because the module remembers a dead
+address by IP.
+
+The failure behind it (hardware, 2026-09-30): `evo_net` did a plain blocking
+`connect()` to each address in turn, and on this console a blocking `connect()`
+does not honour `SO_SNDTIMEO`, so a dead first address held the thread for the
+kernel's SYN retry of about 75 s. `evo_net` has one worker thread, so every
+request queued behind it (posters, EPG, the stream picker's quality read) stalled
+too. `FtpClient` had already met the same thing and works around it with a
+non-blocking connect and `poll`; `evo_net_connect_list` now does the same. It
+checks that:
+
+- a live address connects, and the socket comes back in blocking mode
+- a refused address falls through to the next at once (not after a timeout)
+- a dead first address costs the per-address timeout - not a minute - and the
+  live one behind it connects
+- the dead address is remembered, so the next request does not wait for it again
+- a host whose only address is dead still fails after one timeout, not never
+- an address that recovers is forgiven and goes first again
+
+---
+
+## Video colour matrix
+
+The GPU present path deleted the CPU converters, and with them `tools/bench.sh`
+and `tools/gl_yuv_parity.py` — there is nothing left to benchmark or to compare
+against, because YUV→RGB happens in the AGC video pipelines and costs no
+measurable CPU. The BT.601 reference matrix both tools checked against is kept
+in [`converter-perf.md`](../research/converter-perf.md); a change to the video colour path
+is now verified on hardware.
+---
+
+## Testing UI code on the host
+
+The theme parser and anything else that does not touch the framebuffer can be
+compiled and run natively under sanitizers, which is much faster than a
+console round trip:
+
+```bash
+docker compose run --rm ps5-dev bash -lc '
+  clang -Wall -Wextra -fsanitize=address,undefined \
+    -DEVO_THEME_DIR=\"evo_themes\" \
+    -I/workspace/projects/evoplayer/pp/include \
+    your_test.c /workspace/projects/evoplayer/pp/src/evo_theme.c -o t && ./t'
+```
+
+`EVO_THEME_DIR` is overridable precisely so this works.
+
+---
+
+## Environment
+
+| Variable | Meaning |
+|---|---|
+| `PS5_HOST` | Console IP. Never committed — put it in `.env` at the repo root. |
+| `PS5_WEB_PORT` | `ps5-payload-websrv` port, default 8080. Used for file transfer. |
+| `KLOG_PORT` | klogsrv port, default 3232. |
+| `EXTRA_CFLAGS` | Development build switches, see above. |
+
+Which services need to be running on the console:
+
+| Task | Needs |
+|---|---|
+| `deploy-app.sh`, `tools/evo-remote.sh` | `ps5-payload-ftpsrv` (2121) + ShadowMountPlus to mount + launch |
+| `tools/shot.sh`, `evo-remote.sh` log pull | `ps5-payload-websrv` (8080) |
+| `tools/sandbox-unjail.sh` (rarely) | `ps5-payload-elfldr` (9021) |
+| `klog.sh` | `ps5-payload-klogsrv` (3232) |
+
+All of them need the jailbreak re-run after every console reboot. A port that
+pings but refuses connections almost always means the exploit has lapsed
+rather than anything being wrong with the tooling — see
+[`networking.md`](../hardware/networking.md).

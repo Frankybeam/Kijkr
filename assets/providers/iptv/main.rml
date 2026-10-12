@@ -1,0 +1,269 @@
+<rml>
+<head>
+    <link type="text/rcss" href="main.rcss"/>
+</head>
+<!--
+    The IPTV provider's own UI (#90).
+
+    THIS FILE IS NOT PART OF EVO PLAYER'S UI. It is fetched over HTTP at
+    runtime, cached under /data/evoplayer/providers/iptv/, and rendered in its
+    own Rml context. It is checked into this repo only because the IPTV
+    provider is the one #90 proves the seam against and somebody has to author
+    the first bundle; a third-party provider's bundle would live on that
+    provider's server and EVO would never have seen it.
+
+    It binds to the model named in manifest.json ("data_model": "iptv") and
+    uses only what EvoProviderModel publishes at api_version 1. It references
+    no EVO element id, because it cannot know any.
+
+    ---------------------------------------------------------------------------
+    On looking like EVO
+
+    This bundle deliberately wears EVO's chrome: the same wallpaper and scrim,
+    the same 152dp rail gutter, the same frosted header and status strip, the
+    same card anatomy (preview box, two-line meta, action bar), the same
+    MIDNIGHT palette and the same PlayStation glyph badges. It is EVO's own
+    first-party provider, and a first-party provider that looked like a
+    different application was the wrong kind of proof.
+
+    None of that weakens what the seam demonstrates, because none of it comes
+    from EVO. EVO pushes no theme into a provider context and knows nothing
+    about this document; every colour and every measurement below is the
+    bundle's own choice, and a third-party bundle is free to make the opposite
+    one. What the seam proves is still visible in the layout: this is a channel
+    grid that drills into groups, not the nine-row list EVO draws elsewhere,
+    and the focus ring is drawn here rather than pushed from a selection index.
+
+    Shared assets: EVO publishes its embedded icons, fonts and wallpaper under
+    the "/assets/..." path, which RmlUi's JoinPath resolves to a bundle key. A
+    bundle may use them and must survive without them - every one below sits in
+    a box that still reads correctly when the image does not load. See
+    docs/addons/provider-architecture.md.
+    ---------------------------------------------------------------------------
+
+    Text is bound with {{ }} interpolation. `data-value` is RmlUi's two-way
+    binding for a form control's value attribute and renders nothing on a div.
+-->
+<body data-model="iptv">
+
+    <!-- Wallpaper + scrim, the same plate every EVO screen sits on. The
+         frosted panels below have to have something to refract: a
+         backdrop-filter over a flat fill returns the same flat fill. -->
+    <div id="tv-wallpaper"></div>
+    <div id="tv-scrim"></div>
+
+    <!-- 152dp of gutter for EVO's navigation rail, which is a document in
+         EVO's own context and is composited over this one afterwards
+         (ProviderHostScreen::render). A bundle that started at x=0 would be
+         drawn under it. -->
+    <div id="tv-pane">
+
+        <!-- 1. Header: badge, title, breadcrumb pill, counter -->
+        <div id="tv-header">
+            <div id="tv-header-left">
+                <div id="tv-badge">
+                    <img id="tv-badge-icon" src="/assets/icons/icon_emby.png"/>
+                </div>
+                <div id="tv-title-row">
+                    <span id="tv-title">LIVE TV</span>
+                    <span id="tv-live-dot"></span>
+                </div>
+                <div id="tv-path">{{ breadcrumb }}</div>
+            </div>
+            <div id="tv-header-right" data-if="!empty">
+                <!-- `is_folder_level` is why this reads correctly at both
+                     levels. A data expression cannot aggregate over `rows`, so
+                     the host publishes the flag rather than leaving the bundle
+                     to say "4 CHANNELS" over a list of four groups. -->
+                <div class="tv-counter" data-if="is_folder_level">{{ count }} GROUPS</div>
+                <div class="tv-counter" data-if="!is_folder_level">{{ count }} CHANNELS</div>
+            </div>
+        </div>
+
+        <!-- 2. The guide itself -->
+        <div id="tv-grid-pane">
+
+            <!-- A bundle that cannot reach its playlist must say so on screen:
+                 on a console the log is not reachable while the UI is up. -->
+            <div id="tv-notice" data-if="status != ''"
+                 data-class-tv-notice-bad="has_error">{{ status }}</div>
+
+            <div id="tv-empty" data-if="empty && !loading">
+                <!-- Two clear options from start when no query is active -->
+                <div id="tv-setup" data-if="query == ''">
+                    <div id="tv-setup-header">
+                        <div id="tv-setup-badge">
+                            <img id="tv-setup-badge-icon" src="/assets/icons/icon_emby.png"/>
+                        </div>
+                        <div id="tv-setup-title">SELECT PLAYLIST SOURCE</div>
+                        <div id="tv-setup-desc">Choose how you would like to load your television channels</div>
+                    </div>
+                    <div id="tv-setup-cards">
+                        <div id="tv-card-setup-url" class="tv-setup-card" data-event-click="setup_url()">
+                            <div class="tv-setup-card-preview">
+                                <div class="tv-setup-icon-circle">
+                                    <img class="tv-setup-icon" src="/assets/icons/icon_settings.png"/>
+                                </div>
+                            </div>
+                            <div class="tv-setup-card-meta">
+                                <div class="tv-setup-card-title">ENTER URL MANUALLY</div>
+                                <div class="tv-setup-card-desc">Type an HTTP or HTTPS stream address using the on-screen keyboard</div>
+                            </div>
+                            <div class="tv-setup-card-action">
+                                <div class="tv-setup-glyph-box">
+                                    <img class="tv-setup-glyph" src="/assets/icons/btn_cross.png"/>
+                                </div>
+                                <span class="tv-setup-action-text">ENTER ADDRESS</span>
+                            </div>
+                        </div>
+
+                        <div id="tv-card-setup-usb" class="tv-setup-card" data-event-click="setup_usb()">
+                            <div class="tv-setup-card-preview">
+                                <div class="tv-setup-icon-circle">
+                                    <img class="tv-setup-icon" src="/assets/icons/icon_browse_usb.png"/>
+                                </div>
+                            </div>
+                            <div class="tv-setup-card-meta">
+                                <div class="tv-setup-card-title">BROWSE FROM USB</div>
+                                <div class="tv-setup-card-desc">Scan connected USB storage (/mnt/usb0, /mnt/usb1) for M3U playlists</div>
+                            </div>
+                            <div class="tv-setup-card-action">
+                                <div class="tv-setup-glyph-box">
+                                    <img class="tv-setup-glyph" src="/assets/icons/btn_cross.png"/>
+                                </div>
+                                <span class="tv-setup-action-text">BROWSE USB</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Empty state when search query yielded no results -->
+                <div id="tv-search-empty" data-if="query != ''">
+                    <div id="tv-empty-icon-box">
+                        <img id="tv-empty-icon" src="/assets/icons/icon_emby.png"/>
+                    </div>
+                    <div id="tv-empty-title">NO CHANNELS FOUND</div>
+                    <div id="tv-empty-hint">No channels match '{{ query }}'</div>
+                    <div id="tv-empty-subhint">Press Square to search again, or Circle to clear</div>
+                </div>
+            </div>
+
+            <!-- Centered tuning overlay when connecting to a stream -->
+            <div id="tv-tuning-overlay" data-if="tuning">
+                <div id="tv-tuning-card">
+                    <div class="tv-spinner"></div>
+                    <div id="tv-tuning-title">TUNING CHANNEL</div>
+                    <div id="tv-tuning-subtitle">Connecting to live stream...</div>
+                </div>
+            </div>
+
+            <!--
+                One card per row, and the same card for a `group-title` folder
+                and for a channel - the preview box, the two-line meta and the
+                action bar are EVO's card anatomy, filled with a channel
+                guide's content instead of a file's.
+
+                `tv-grid-notice` gives back the height the status bar above
+                took, so a visible error does not push the last row out of the
+                pane.
+            -->
+            <div id="tv-grid" data-if="!empty" data-class-tv-grid-notice="status != ''">
+                <div class="tv-card" data-for="row : rows"
+                     data-attr-rowid="row.id" data-event-click="activate()"
+                     data-class-tv-card-group="row.is_folder">
+
+                    <div class="tv-preview">
+                        <img class="tv-logo" data-if="row.art != ''"
+                             data-attr-src="row.art"/>
+                        <img class="tv-folder-icon" data-if="row.is_folder"
+                             src="/assets/icons/icon_folder.png"/>
+                        <!-- No logo yet, or none in the playlist: the
+                             channel's initial, so the grid never has holes in
+                             it. A provider picks its own placeholder. -->
+                        <div class="tv-initial"
+                             data-if="!row.is_folder && row.art == ''">{{ row.initial }}</div>
+
+                        <div class="tv-badge-group" data-if="row.is_folder">GROUP</div>
+                        <div class="tv-badge-live"
+                             data-if="row.is_live && !row.is_folder">LIVE</div>
+                    </div>
+
+                    <div class="tv-meta">
+                        <div class="tv-name">{{ row.title }}</div>
+
+                        <!-- A folder's subtitle is its channel count. A
+                             channel's is its group at the root and its current
+                             programme inside one, so it is only drawn where
+                             the NOW line is not already saying it. -->
+                        <div class="tv-sub"
+                             data-if="row.is_folder || row.now == ''">{{ row.subtitle }}</div>
+
+                        <div class="tv-epg" data-if="row.now != ''">
+                            <span class="tv-epg-label">NOW</span>
+                            <span class="tv-epg-title">{{ row.now }}</span>
+                        </div>
+                        <div class="tv-epg tv-epg-next" data-if="row.next != ''">
+                            <span class="tv-epg-label">NEXT</span>
+                            <span class="tv-epg-title">{{ row.next }}</span>
+                        </div>
+                    </div>
+
+                    <div class="tv-action-bar">
+                        <div class="tv-kind" data-if="row.is_folder">GROUP</div>
+                        <div class="tv-kind" data-if="!row.is_folder">CHANNEL</div>
+                        <div class="tv-tag" data-if="row.is_folder">OPEN</div>
+                        <div class="tv-tag" data-if="!row.is_folder">LIVE</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Status strip: the source on the left, controller hints on the
+             right, exactly where every other EVO screen puts them. -->
+        <div id="tv-status-strip">
+            <div id="tv-status-details">
+                <span id="tv-source-name">{{ provider_name }}</span>
+                <!-- Not the breadcrumb: that is already in the header pill,
+                     and printing it twice made the two panels look like a
+                     mistake rather than a pair. -->
+                <span class="tv-spec-pill" data-if="is_folder_level">CHANNEL GUIDE</span>
+                <span class="tv-spec-pill" data-if="!is_folder_level">LIVE CHANNELS</span>
+                <div id="tv-tuning-indicator" data-if="loading || tuning">
+                    <div class="tv-spinner-sm"></div>
+                    <span id="tv-tuning" data-if="tuning">TUNING...</span>
+                    <span id="tv-tuning" data-if="loading && !tuning">LOADING...</span>
+                </div>
+            </div>
+
+            <div id="tv-footer">
+                <div class="tv-hint">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_cross.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text" data-if="empty && !loading">SELECT</span>
+                    <span class="tv-hint-text" data-if="!empty || loading">WATCH</span>
+                </div>
+                <div class="tv-hint">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_circle.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text">BACK</span>
+                </div>
+                <div class="tv-hint" data-if="!empty">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_square.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text">SEARCH</span>
+                </div>
+                <div class="tv-hint">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_dpad.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text">NAVIGATE</span>
+                </div>
+                <!-- OPTIONS, not Triangle: Triangle is the virtual keyboard's
+                     own Quick Done, so opening the source editor with it
+                     submitted the prompt on the spot. There is no OPTIONS
+                     glyph in the icon set, so it takes the pill treatment EVO
+                     uses for L1/R1. -->
+                <div class="tv-hint" data-if="!empty">
+                    <div class="tv-glyph-pill"><span class="tv-glyph-pill-text">OPTIONS</span></div>
+                    <span class="tv-hint-text">SOURCE</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

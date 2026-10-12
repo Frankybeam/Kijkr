@@ -1,0 +1,376 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Subtitle Track Picker RCSS Stylesheet
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16dp;
+    color: #ffffff;
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+    width: 1920dp;
+    height: 1080dp;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+/* Fullscreen Dimmed Scrim */
+#subtitles-scrim {
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #000000b8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+/* Subtitle Modal Card */
+#subtitles-card {
+    width: 960dp;
+    background-color: #0c121ffc;
+    border-width: 1dp;
+    border-color: #1e2c44;
+    border-radius: 24dp;
+    padding: 34dp 44dp;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 60dp;
+}
+
+/* Header */
+#subtitles-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24dp;
+    width: 872dp;
+}
+
+#header-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+#subtitles-eyebrow {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #ffd700;
+    letter-spacing: 1.5dp;
+}
+
+#subtitles-title {
+    font-size: 26dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5dp;
+    margin-top: 4dp;
+}
+
+#subtitles-header-pills {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12dp;
+}
+
+#subtitles-sync-pill {
+    background-color: #131d2e;
+    border-width: 1dp;
+    border-color: #243550;
+    border-radius: 20dp;
+    padding: 8dp 16dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#subtitles-sync-label {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 0.5dp;
+}
+
+/* #110: the secondary track's own sync, shown only while one is active. */
+#subtitles-sync2-pill {
+    display: none;
+    background-color: #131d2e;
+    border-width: 1dp;
+    border-color: #243550;
+    border-radius: 20dp;
+    padding: 8dp 16dp;
+    flex-direction: row;
+    align-items: center;
+}
+
+#subtitles-sync2-label {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #ffe27a;
+    letter-spacing: 0.5dp;
+}
+
+#subtitles-size-pill {
+    background-color: #131d2e;
+    border-width: 1dp;
+    border-color: #243550;
+    border-radius: 20dp;
+    padding: 8dp 16dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.size-glyph {
+    width: 18dp;
+    height: 18dp;
+    display: inline-block;
+}
+
+#subtitles-size-label {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 0.5dp;
+}
+
+.btn-tag {
+    background-color: #1a2336;
+    border-width: 1dp;
+    border-color: #2e3e5c;
+    padding: 2dp 7dp;
+    border-radius: 7dp;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #00d2ff;
+}
+
+/* Track List */
+#subtitles-list {
+    display: flex;
+    flex-direction: column;
+    width: 872dp;
+}
+
+.sub-row {
+    width: 872dp;
+    height: 58dp;
+    background-color: #0d1422;
+    border-width: 1dp;
+    border-color: #172338;
+    border-radius: 15dp;
+    margin-bottom: 10dp;
+    padding: 0 20dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.row-focused {
+    background-color: #142036;
+    border-width: 1.5dp;
+    border-color: #38bdf8;
+}
+
+.sub-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.sub-check-box {
+    width: 22dp;
+    height: 22dp;
+    border-radius: 11dp;
+    border-width: 1.5dp;
+    border-color: #2b3e5c;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 16dp;
+}
+
+.sub-check-box.checked {
+    border-color: #38bdf8;
+}
+
+.sub-check-dot {
+    width: 10dp;
+    height: 10dp;
+    border-radius: 5dp;
+    background-color: transparent;
+}
+
+.checked .sub-check-dot {
+    background-color: #38bdf8;
+}
+
+.sub-title {
+    font-size: 17dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5dp;
+}
+
+.sub-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.sub-badge {
+    background-color: #131d2e;
+    border-width: 1dp;
+    border-color: #243550;
+    border-radius: 8dp;
+    padding: 4dp 10dp;
+    font-size: 12dp;
+    font-weight: bold;
+    color: #94a3b8;
+    letter-spacing: 0.5dp;
+}
+
+.row-focused .sub-badge {
+    background-color: #0369a1;
+    border-color: #38bdf8;
+    color: #ffffff;
+}
+
+.sub-hidden {
+    display: none;
+}
+
+/* Which line of dialogue a track is (#110). Amber for the secondary matches
+ * the caption's default colour; the primary keeps the theme's cyan. */
+.sub-tag {
+    border-width: 1dp;
+    border-radius: 8dp;
+    padding: 3dp 9dp;
+    margin-right: 8dp;
+    font-size: 11dp;
+    font-weight: bold;
+    letter-spacing: 0.8dp;
+}
+
+.sub-tag.tag-primary {
+    color: #38bdf8;
+    border-color: #38bdf8;
+    background-color: #0b2a44;
+}
+
+.sub-tag.tag-secondary {
+    color: #ffe27a;
+    border-color: #ffe27a;
+    background-color: #3a3208;
+}
+
+.tag-hidden {
+    display: none;
+}
+
+/* AUTO-SYNC (#102) is an action, not a track: keep the check's space so the
+ * titles still line up, but draw nothing in it. */
+.row-action .sub-check-box {
+    visibility: hidden;
+}
+
+.row-disabled {
+    opacity: 0.45;
+}
+
+.badge-hidden {
+    display: none;
+}
+
+/* Footer Hints */
+#subtitles-footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 22dp;
+    margin-top: 20dp;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.footer-glyph {
+    width: 20dp;
+    height: 20dp;
+    display: inline-block;
+}
+
+.glyph-badge {
+    width: 28dp;
+    height: 28dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 14dp;
+    background-color: rgba(20, 40, 80, 0.9);
+}
+
+.glyph-badge-img {
+    width: 18dp;
+    height: 18dp;
+}
+
+.footer-text {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1dp;
+}
+
+/* Live Subtitle Preview Box */
+#subtitles-preview-box {
+    position: absolute;
+    bottom: 50dp;
+    left: 0;
+    width: 1920dp;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+#subtitles-preview-label {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1.5dp;
+    margin-bottom: 8dp;
+}
+
+#subtitles-preview-text {
+    color: #ffffff;
+    font-weight: bold;
+}
+
+.preview-small {
+    font-size: 22dp;
+}
+
+.preview-medium {
+    font-size: 28dp;
+}
+
+.preview-large {
+    font-size: 36dp;
+}

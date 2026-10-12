@@ -1,0 +1,46 @@
+diff --git a/src/ui/fonts.hpp b/src/ui/fonts.hpp
+index 8b6b028..6b07347 100644
+--- a/src/ui/fonts.hpp
++++ b/src/ui/fonts.hpp
+@@ -15,6 +15,22 @@
+ namespace hui::ui
+ {
+ 
++// An app can put its own words in another language: every line text() draws
++// and measure() measures goes through this filter first. It returns the text
++// to use, which must stay valid until the next frame (or the input itself).
++#define HUI_HAS_TEXT_FILTER 1
++using TextFilter = std::string_view (*)(std::string_view);
++inline TextFilter &text_filter()
++{
++    static TextFilter filter = nullptr;
++    return filter;
++}
++inline std::string_view filtered(std::string_view value)
++{
++    const TextFilter filter = text_filter();
++    return filter ? filter(value) : value;
++}
++
+ // A loaded font and the GL texture holding its atlas.
+ struct FontRef
+ {
+@@ -23,7 +39,7 @@ struct FontRef
+ 
+     float measure(std::string_view text, float size, float tracking = 0.0f) const
+     {
+-        return font->measure(text, size, tracking);
++        return font->measure(filtered(text), size, tracking);
+     }
+ };
+ 
+@@ -43,7 +59,8 @@ inline float text(gfx::DrawList &list, const FontRef &font, std::string_view val
+                   float baseline, float size, gfx::Color color, gfx::Align align = gfx::Align::left,
+                   float tracking = 0.0f)
+ {
+-    return list.text(*font.font, font.texture, value, x, baseline, size, color, align, tracking);
++    return list.text(*font.font, font.texture, filtered(value), x, baseline, size, color, align,
++                     tracking);
+ }
+ 
+ // ASCII upper case, for small tracked labels ("CONTINUE PLAYING").

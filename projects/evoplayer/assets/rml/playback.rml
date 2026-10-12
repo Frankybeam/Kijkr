@@ -1,0 +1,161 @@
+<rml>
+<head>
+    <link type="text/rcss" href="playback.rcss"/>
+</head>
+<body id="playback-hud">
+    <!-- Top Header Bar -->
+    <div id="top-scrim">
+        <div id="title-block">
+            <div id="media-title"></div>
+            <div id="media-meta"></div>
+        </div>
+        <div id="badge-rack">
+            <span id="badge-res" class="badge-res"></span>
+            <span id="badge-hdr" class="badge-hdr"></span>
+            <span id="badge-codec" class="badge-codec"></span>
+            <span id="badge-fps" class="badge-fps"></span>
+            <span id="badge-decoder" class="badge-decoder"></span>
+            <span id="badge-upscale" class="badge-upscale"></span>
+            <span id="badge-smooth" class="badge-smooth"></span>
+        </div>
+    </div>
+
+    <!-- On-video caption overlay (#81) — RmlUi/Unicode, replaces the ASCII bitmap path -->
+    <div id="subtitle-layer">
+        <!-- #110: the secondary caption stacks directly above the primary -->
+        <div class="sub-line"><div id="subtitle-box-secondary" class="sub2 sub2-medium sub2-yellow"></div></div>
+        <div class="sub-line"><div id="subtitle-box" class="sub-medium"></div></div>
+    </div>
+    <!-- #110: or, by setting, the secondary sits alone at the top of the screen -->
+    <div id="subtitle-layer-top">
+        <div id="subtitle-box-top" class="sub2 sub2-medium sub2-yellow"></div>
+    </div>
+
+    <!-- Music "NOW PLAYING" visualiser (#81) — shown for audio-only playback,
+         replaces draw_player_screen's rr_text/rr_fill branch -->
+    <div id="music-view">
+        <div id="music-card">
+            <div id="music-art"></div>
+            <div id="music-lines">
+                <div id="music-title">KIJKR MUSIC</div>
+                <div id="music-state">PLAYING</div>
+                <div id="music-hint">AUDIO · CROSS PAUSE · L/R SEEK</div>
+            </div>
+        </div>
+        <div id="music-bars">
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+        </div>
+    </div>
+
+    <!-- Center Play/Pause & Scrubbing Overlay -->
+    <div id="center-overlay">
+        <div id="scrub-capsule">
+            <img id="scrub-thumb" src=""/>
+            <div id="scrub-readout">
+                <span id="scrub-label">SEEK TO</span>
+                <span id="scrub-time">00:00:00</span>
+            </div>
+        </div>
+        <div id="pause-badge">
+            <span id="pause-label">PAUSED</span>
+        </div>
+        <div id="loading-badge">
+            <div id="loading-spinner"></div>
+            <span id="loading-label">LOADING</span>
+        </div>
+    </div>
+
+    <!-- Dev FPS pill (#81) -->
+    <div id="fps-pill"><span id="fps-value">0 FPS</span></div>
+
+    <!-- Playback diagnostic HUD (#81 / #63): live stream lines + telemetry graphs -->
+    <div id="stats-hud">
+        <div class="stats-title">PLAYBACK DIAGNOSTICS</div>
+        <div id="stats-video" class="stats-line">--</div>
+        <div id="stats-audio" class="stats-line">--</div>
+        <div id="stats-subs" class="stats-line">--</div>
+        <div id="stats-perf" class="stats-line">--</div>
+        <div id="stats-queues" class="stats-line">--</div>
+        <div id="stats-clocks" class="stats-line">--</div>
+        <div class="stats-sep"></div>
+        <div class="graph-row">
+            <span class="graph-label text-cyan">GPU</span>
+            <div id="graph-gpu" class="graph"></div>
+            <span id="graph-gpu-val" class="graph-val text-cyan">--</span>
+        </div>
+        <div class="graph-row">
+            <span class="graph-label text-amber">RAM</span>
+            <div id="graph-ram" class="graph"></div>
+            <span id="graph-ram-val" class="graph-val text-amber">--</span>
+        </div>
+        <div class="graph-row">
+            <span class="graph-label text-green">CPU</span>
+            <div id="graph-cpu" class="graph"></div>
+            <span id="graph-cpu-val" class="graph-val text-green">--</span>
+        </div>
+    </div>
+
+    <!-- Bottom Netflix Controller Bar -->
+    <div id="bottom-scrim">
+        <!-- Progress Bar Timeline -->
+        <div id="progress-container">
+            <div id="progress-track">
+                <div id="progress-fill">
+                    <div id="progress-thumb"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Time Row -->
+        <div id="time-row">
+            <span id="time-current">00:00:00</span>
+            <span id="time-duration">00:00:00</span>
+        </div>
+
+        <!-- Netflix Action Ribbon & Hints -->
+        <div id="controls-row">
+            <div class="control-item">
+                <div class="glyph-badge"><img src="icons/btn_cross.png" class="glyph-badge-img"/></div>
+                <span id="label-playpause" class="control-label">PAUSE</span>
+            </div>
+            <div class="control-item" id="item-seek">
+                <div class="glyph-badge"><img src="icons/btn_dpad.png" class="glyph-badge-img"/></div>
+                <span class="control-label">SEEK 10s / L2 R2 1 MIN</span>
+            </div>
+            <div class="control-item" id="item-chapter">
+                <span class="btn-tag">L1 / R1</span>
+                <span class="control-label">CHAPTER</span>
+            </div>
+            <div class="control-item">
+                <span class="btn-tag">TOUCHPAD</span>
+                <span id="label-audio" class="control-label">AUDIO: Stereo</span>
+            </div>
+            <div class="control-item" id="item-subs">
+                <span class="btn-tag">UP / DN</span>
+                <span id="label-subs" class="control-label">SUBS: None</span>
+            </div>
+            <div class="control-item" id="item-subsync">
+                <span class="btn-tag">SWIPE &lt; &gt;</span>
+                <span id="label-subsync" class="control-label">SYNC: 0 ms</span>
+            </div>
+            <div class="control-item">
+                <div class="glyph-badge"><img src="icons/btn_square.png" class="glyph-badge-img"/></div>
+                <span class="control-label">INFO</span>
+            </div>
+            <div class="control-item">
+                <div class="glyph-badge"><img src="icons/btn_triangle.png" class="glyph-badge-img"/></div>
+                <span id="label-aspect" class="control-label">ASPECT: FIT</span>
+            </div>
+            <div class="control-item">
+                <div class="glyph-badge"><img src="icons/btn_circle.png" class="glyph-badge-img"/></div>
+                <span class="control-label">BACK</span>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>
