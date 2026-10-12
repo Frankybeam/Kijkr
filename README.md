@@ -176,11 +176,6 @@ Full build docs: [docs/build/building.md](docs/build/building.md). The rest of
 (in Dutch). A release is made by pushing a tag that matches
 `projects/evoplayer/VERSION`, e.g. `git tag v1.3.0 && git push origin v1.3.0`.
 
-## Name and logo
-
-The default name and logo live in [branding/](branding/README.md); replace them
-there to rebrand.
-
 ## License
 
 GPL-3.0-or-later, like EVO Player and ProsperoPlayer before it. See
