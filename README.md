@@ -65,6 +65,84 @@ country prefixes like `NL:` and quality tags like `HD`.
   R2 on M3U and Xtream); Show hidden channels brings them back. Xtream and
   Stalker get a Favorite channels folder at the top.
 
+## Controls Reference
+
+**Anywhere**
+
+| Button | Action |
+|---|---|
+| **Left** (at the left edge) | Open the side menu |
+| **L3** | Screenshot, saved as `evo_shot_NNN.bmp` on the USB stick (or in `/data/kijkr` without one) |
+| **Hold ○ for 2 s on Home** | Close Kijkr |
+
+**Home**
+
+| Button | Action |
+|---|---|
+| **✕** | Play / open |
+| **○** | Back to the top tile |
+| **□** | Remove the item from Continue Watching or Favourites |
+| **OPTIONS** | Options for the focused item |
+
+**Live TV, films and series lists**
+
+| Button | Action |
+|---|---|
+| **✕** | Play the channel or open the folder |
+| **○** | Back one level; at the top, back to the source list |
+| **△** | Add to / remove from favourites. Stalker, on a category: hide it (on a portal: remove it) |
+| **□** | Search |
+| **OPTIONS** | Menu: TV guide, hide / move channel, show hidden channels, account or playlist settings |
+| **Touchpad** | On a channel: the TV guide grid. On a film or episode: watched / not watched |
+| **L1 / R1** | Page up / page down |
+| **L2 / R2** | M3U and Xtream channel: move it one place up / down. Stalker: move a category, or change the sort order of a list. Search results: switch between all, films, series and live TV |
+| **R3** | Stalker: move the item to a position you type |
+
+**TV guide grid**
+
+| Button | Action |
+|---|---|
+| **Up / Down** | Previous / next channel |
+| **Left / Right** | Previous / next programme |
+| **L1 / R1** | Page through the channels |
+| **L2 / R2** | One hour back / forward |
+| **✕** | Watch what is on now, play a past programme back (catch-up), or see when a later one starts |
+| **○ / Touchpad** | Close the grid |
+
+**During playback**
+
+| Button | Films and series | Live TV |
+|---|---|---|
+| **✕** | Play / pause (while seeking: jump there now) | Play / pause |
+| **○** | Stop (asks first; while seeking: cancel the seek) | Stop (asks first) |
+| **△** | Aspect ratio: Fit / Fill / Stretch | same |
+| **□** | Media info (codec, resolution, decoder) | same |
+| **OPTIONS** | Stats on / off | same |
+| **Left / Right** | Seek 10 s back / forward | Stalker: previous / next channel |
+| **L1 / R1** | Previous / next chapter (Stalker series: previous / next episode) | Stalker: previous / next channel |
+| **L2 / R2** | Seek 1 min back / forward | — |
+| **Up** | Subtitles on / off | same |
+| **Down** | Subtitle track picker | same |
+| **Touchpad click** | Audio track picker | same |
+| **Touchpad swipe left / right** | Subtitles 100 ms earlier / later | same |
+
+When a Stalker episode ends, the next one starts after ten seconds: **✕**
+starts it at once, **○** cancels.
+
+**On-screen keyboard**
+
+| Button | Action |
+|---|---|
+| **✕** | Type the focused key |
+| **○** | Cancel |
+| **△** | Done |
+| **□** | Backspace |
+| **L1 / R1** | Switch letters / symbols |
+| **L2 / R2** | Type `.` / `:` (handy for addresses) |
+
+Long addresses can also be typed on your phone: the keyboard shows a link to
+open in a browser on the same network.
+
 ## What is different from EVO Player
 
 Kijkr starts from EVO Player 0.12.0. In short: everything that is not live TV
@@ -142,6 +220,11 @@ The full list per version, in Dutch, is in [WIJZIGINGEN.md](WIJZIGINGEN.md).
 
 ## Installation
 
+**You need:** a PS5 on firmware below 13.60 that is jailbroken (run the
+jailbreak again after every reboot), ShadowMountPlus (or another tool that
+mounts `.ffpfsc` images), and an IPTV source: an M3U playlist, an Xtream Codes
+account or a Stalker portal.
+
 Kijkr is a game-category app module with title ID **`PPSA99077`**, so it
 installs next to EVO Player (`PPSA99039`) without replacing it.
 
@@ -170,14 +253,32 @@ translations) by itself.
 Full build docs: [docs/build/building.md](docs/build/building.md). The rest of
 `docs/` is EVO Player's developer documentation and still uses its name.
 
+## Reporting a problem
+
+Open an [issue](https://github.com/Frankybeam/Kijkr/issues) with your
+firmware, the Kijkr version (About, in the side menu) and the source type. With a
+USB stick in the console Kijkr writes a log to `evo.log` on the stick; attach
+it. Xtream user names and passwords are masked in it, but check it for your
+portal address and MAC before you post it.
+
 ## Changes per version
 
 [WIJZIGINGEN.md](WIJZIGINGEN.md) lists what changed in each Kijkr version
 (in Dutch). A release is made by pushing a tag that matches
 `projects/evoplayer/VERSION`, e.g. `git tag v1.3.0 && git push origin v1.3.0`.
 
-## License
+## Credits & License
+Forked from Evo Player by sainsaji and licensed under GPL-3.0-or-later (see [LICENSE](LICENSE) and [COPYRIGHT.md](COPYRIGHT.md)).
 
-GPL-3.0-or-later, like EVO Player and ProsperoPlayer before it. See
-[LICENSE](LICENSE) and [COPYRIGHT.md](COPYRIGHT.md). EVO Player's original
-README is kept at [docs/EVO_PLAYER_README.md](docs/EVO_PLAYER_README.md).
+Thanks to:
+
+- ps5-payload-dev (John Törnblom) — SDK and toolchain
+- KINGDKAK — ProsperoPlayer
+- zecoxao/sce_symbols — NID symbol database
+- BlackBearReloaded — ps5-homebrew-ui, the UI kit EVO's interface is built on
+- mihawk-99 — PS5_VulkanTemplate, whose 1 GiB flexible-memory change EVO's app module uses
+- PS5 developers Philow, sword and 0xManuel — for their help and research
+
+Kijkr is independent homebrew software and is not affiliated with, endorsed by, or associated with Sony Interactive Entertainment. All PlayStation trademarks belong to their respective owners.
+
+
