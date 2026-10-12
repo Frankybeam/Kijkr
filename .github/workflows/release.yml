@@ -203,10 +203,10 @@ jobs:
                 ($0 == v || index($0, v ":") == 1) {found=1; next}
                 found && /^## / {exit}
                 found {print}
-              ' WIJZIGINGEN.md > dist_notes_body.md && [ -s dist_notes_body.md ]; then
+              ' CHANGES.md > dist_notes_body.md && [ -s dist_notes_body.md ]; then
             echo "found changelog section for ${V}"
           else
-            echo "::warning::no WIJZIGINGEN.md section for ${V} - notes will be boilerplate only"
+            echo "::warning::no CHANGES.md section for ${V} - notes will be boilerplate only"
             : > dist_notes_body.md
           fi
 

@@ -1,5 +1,7 @@
 # Kijkr: wat er veranderd is ten opzichte van EVO Player 0.12.0
 
+In het Engels: [CHANGES.md](CHANGES.md).
+
 ## 1.3.0: tv-gids als raster, terugkijken, meerdere accounts, eigen zendervolgorde
 - **Tv-gids als raster**: touchpad op een zender (of Opties > TV guide grid) toont alle
   zenders van de lijst onder elkaar, met hun programma's langs een klok van 2 uur.

@@ -216,7 +216,8 @@ The player itself is unchanged: hardware decode (H.264, HEVC, VP9, AV1 up to
 motion smoothing, subtitles (ASS / SRT / WebVTT, dual subtitles, auto-sync),
 typing from your phone, Xtream films and series, and backup to USB.
 
-The full list per version, in Dutch, is in [WIJZIGINGEN.md](WIJZIGINGEN.md).
+The full list per version is in [CHANGES.md](CHANGES.md) (English) and
+[WIJZIGINGEN.md](WIJZIGINGEN.md) (Dutch).
 
 ## Installation
 
@@ -263,8 +264,8 @@ portal address and MAC before you post it.
 
 ## Changes per version
 
-[WIJZIGINGEN.md](WIJZIGINGEN.md) lists what changed in each Kijkr version
-(in Dutch). A release is made by pushing a tag that matches
+[CHANGES.md](CHANGES.md) lists what changed in each Kijkr version
+(in Dutch: [WIJZIGINGEN.md](WIJZIGINGEN.md)). A release is made by pushing a tag that matches
 `projects/evoplayer/VERSION`, e.g. `git tag v1.3.0 && git push origin v1.3.0`.
 
 ## Credits & License
